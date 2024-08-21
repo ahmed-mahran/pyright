@@ -13,8 +13,8 @@ import {
 import { AnalyzerService } from './analyzer/service';
 import { ConsoleInterface } from './common/console';
 import { createDeferred } from './common/deferred';
-import { Uri } from './common/uri/uri';
 import { ServiceProvider } from './common/serviceProvider';
+import { Uri } from './common/uri/uri';
 
 let WorkspaceFactoryIdCounter = 0;
 
@@ -315,7 +315,7 @@ export class WorkspaceFactory implements IWorkspaceFactory {
             pythonPath,
             pythonPathKind: WorkspacePythonPathKind.Mutable,
             service: this._createService(name, uri, kinds),
-            disableLanguageServices: false,
+            disableLanguageServices: true,
             disableTaggedHints: false,
             disableOrganizeImports: false,
             disableWorkspaceSymbol: false,

@@ -64,7 +64,7 @@ export async function activate(context: ExtensionContext) {
                 'these extensions can lead to problems. Pyright will disable itself. ' +
                 'Uninstall or disable Pyright to avoid this message.'
         );
-        return;
+        // return;
     }
 
     cancellationStrategy = new FileBasedCancellationStrategy();
