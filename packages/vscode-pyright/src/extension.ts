@@ -58,13 +58,11 @@ export async function activate(context: ExtensionContext) {
     // hover text, etc.because the two extensions overlap in functionality.
     const pylanceExtension = extensions.getExtension('ms-python.vscode-pylance');
     if (pylanceExtension) {
-        window.showErrorMessage(
+        window.showWarningMessage(
             'Pyright has detected that the Pylance extension is installed. ' +
                 'Pylance includes the functionality of Pyright, and running both of ' +
-                'these extensions can lead to problems. Pyright will disable itself. ' +
-                'Uninstall or disable Pyright to avoid this message.'
+                'these extensions may lead to problems.'
         );
-        // return;
     }
 
     cancellationStrategy = new FileBasedCancellationStrategy();
@@ -123,7 +121,7 @@ export async function activate(context: ExtensionContext) {
                     }
 
                     for (const [i, item] of params.items.entries()) {
-                        if (item.section === 'python.analysis') {
+                        if (item.section === 'pyright.analysis') {
                             const analysisConfig = workspace.getConfiguration(
                                 item.section,
                                 item.scopeUri ? Uri.parse(item.scopeUri) : undefined
@@ -138,11 +136,11 @@ export async function activate(context: ExtensionContext) {
                         }
                     }
 
-                    // For backwards compatibility, set python.pythonPath to the configured
+                    // For backwards compatibility, set pyright.pythonPath to the configured
                     // value as though it were in the user's settings.json file.
                     const addPythonPath = (settings: any[]): Promise<any[]> => {
                         const pythonPathPromises: Promise<string | undefined>[] = params.items.map((item) => {
-                            if (item.section === 'python') {
+                            if (item.section === 'pyright') {
                                 const uri = item.scopeUri ? Uri.parse(item.scopeUri) : undefined;
                                 return getPythonPathFromPythonExtension(client.outputChannel, uri, () => {
                                     // Posts a "workspace/didChangeConfiguration" message to the service
