@@ -800,9 +800,9 @@ export class TestState {
             CancellationToken.None
         );
 
-        if (command.command === 'pyright.createtypestub') {
+        if (command.command === 'mypyright.createtypestub') {
             await this._verifyFiles(files);
-        } else if (command.command === 'pyright.organizeimports') {
+        } else if (command.command === 'mypyright.organizeimports') {
             // Organize imports command can be used on only one file at a time,
             // so there is no looping over "commandResult" or "files".
             const workspaceEditResult = commandResult as WorkspaceEdit;

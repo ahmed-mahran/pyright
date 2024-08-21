@@ -399,9 +399,9 @@ declare namespace Consts {
     }
 
     export enum Commands {
-        createTypeStub = 'pyright.createtypestub',
-        restartServer = 'pyright.restartserver',
-        orderImports = 'pyright.organizeimports',
+        createTypeStub = 'mypyright.createtypestub',
+        restartServer = 'mypyright.restartserver',
+        orderImports = 'mypyright.organizeimports',
     }
 
     namespace DocumentHighlightKind {

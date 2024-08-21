@@ -99,7 +99,7 @@ export async function activate(context: ExtensionContext) {
         ],
         synchronize: {
             // Synchronize the setting section to the server.
-            configurationSection: ['python', 'pyright'],
+            configurationSection: ['python', 'mypyright'],
         },
         connectionOptions: { cancellationStrategy: cancellationStrategy },
         middleware: {
@@ -121,7 +121,7 @@ export async function activate(context: ExtensionContext) {
                     }
 
                     for (const [i, item] of params.items.entries()) {
-                        if (item.section === 'pyright.analysis') {
+                        if (item.section === 'mypyright.analysis') {
                             const analysisConfig = workspace.getConfiguration(
                                 item.section,
                                 item.scopeUri ? Uri.parse(item.scopeUri) : undefined
@@ -136,11 +136,11 @@ export async function activate(context: ExtensionContext) {
                         }
                     }
 
-                    // For backwards compatibility, set pyright.pythonPath to the configured
+                    // For backwards compatibility, set mypyright.pythonPath to the configured
                     // value as though it were in the user's settings.json file.
                     const addPythonPath = (settings: any[]): Promise<any[]> => {
                         const pythonPathPromises: Promise<string | undefined>[] = params.items.map((item) => {
-                            if (item.section === 'pyright') {
+                            if (item.section === 'mypyright') {
                                 const uri = item.scopeUri ? Uri.parse(item.scopeUri) : undefined;
                                 return getPythonPathFromPythonExtension(client.outputChannel, uri, () => {
                                     // Posts a "workspace/didChangeConfiguration" message to the service
@@ -220,7 +220,7 @@ export async function activate(context: ExtensionContext) {
     // Register the debug only commands when running under the debugger.
     if (context.extensionMode === ExtensionMode.Development) {
         // Create a 'when' context for development.
-        commands.executeCommand('setContext', 'pyright.development', true);
+        commands.executeCommand('setContext', 'mypyright.development', true);
 
         // Register the commands that only work when in development mode.
         context.subscriptions.push(
