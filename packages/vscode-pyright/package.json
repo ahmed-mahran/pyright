@@ -45,41 +45,41 @@
             {
                 "command": "mypyright.organizeimports",
                 "title": "Organize Imports",
-                "category": "Pyright"
+                "category": "MyPyright"
             },
             {
                 "command": "mypyright.restartserver",
                 "title": "Restart Server",
-                "category": "Pyright"
+                "category": "MyPyright"
             },
             {
                 "command": "mypyright.dumpTokens",
                 "title": "Dump token streams ...",
-                "category": "Pyright",
+                "category": "MyPyright",
                 "enablement": "editorLangId == python && mypyright.development"
             },
             {
                 "command": "mypyright.dumpNodes",
                 "title": "Dump parse tree ...",
-                "category": "Pyright",
+                "category": "MyPyright",
                 "enablement": "editorLangId == python && mypyright.development"
             },
             {
                 "command": "mypyright.dumpTypes",
                 "title": "Dump type info ...",
-                "category": "Pyright",
+                "category": "MyPyright",
                 "enablement": "editorLangId == python && mypyright.development"
             },
             {
                 "command": "mypyright.dumpCachedTypes",
                 "title": "Dump cached type info ...",
-                "category": "Pyright",
+                "category": "MyPyright",
                 "enablement": "editorLangId == python && mypyright.development"
             },
             {
                 "command": "mypyright.dumpCodeFlowGraph",
                 "title": "Dump code flow graph for node ...",
-                "category": "Pyright",
+                "category": "MyPyright",
                 "enablement": "editorLangId == python && mypyright.development"
             }
         ],
@@ -87,8 +87,8 @@
             "editor/context": [
                 {
                     "command": "mypyright.organizeimports",
-                    "title": "Pyright: Organize Imports",
-                    "group": "Pyright",
+                    "title": "MyPyright: Organize Imports",
+                    "group": "MyPyright",
                     "when": "editorLangId == python"
                 }
             ],
@@ -117,7 +117,7 @@
         },
         "configuration": {
             "type": "object",
-            "title": "Pyright",
+            "title": "MyPyright",
             "properties": {
                 "mypyright.analysis.autoImportCompletions": {
                     "type": "boolean",

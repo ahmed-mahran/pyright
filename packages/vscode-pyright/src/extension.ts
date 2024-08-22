@@ -128,7 +128,7 @@ export async function activate(context: ExtensionContext) {
                     // value as though it were in the user's settings.json file.
                     const addPythonPath = (settings: any[]): Promise<any[]> => {
                         const pythonPathPromises: Promise<string | undefined>[] = params.items.map((item) => {
-                            if (item.section === 'mypyright') {
+                            if (item.section === 'python') {
                                 const uri = item.scopeUri ? Uri.parse(item.scopeUri) : undefined;
                                 return getPythonPathFromPythonExtension(client.outputChannel, uri, () => {
                                     // Posts a "workspace/didChangeConfiguration" message to the service
@@ -161,7 +161,7 @@ export async function activate(context: ExtensionContext) {
     };
 
     // Create the language client and start the client.
-    const client = new LanguageClient('python', 'Pyright', serverOptions, clientOptions);
+    const client = new LanguageClient('python', 'MyPyright', serverOptions, clientOptions);
     languageClient = client;
 
     // Register our custom commands.

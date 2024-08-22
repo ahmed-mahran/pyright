@@ -1,6 +1,6 @@
 {
     "name": "pyright",
-    "displayName": "Pyright",
+    "displayName": "MyPyright",
     "description": "Type checker for the Python language",
     "version": "1.1.377",
     "license": "MIT",
@@ -13,7 +13,7 @@
     },
     "repository": {
         "type": "git",
-        "url": "https://github.com/Microsoft/pyright",
+        "url": "https://github.com/ahmed-mahran/pyright",
         "directory": "packages/pyright"
     },
     "scripts": {

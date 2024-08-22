@@ -1110,8 +1110,8 @@ export class AnalyzerService {
         return this._attemptParseFile(pyprojectPath, (fileContents, attemptCount) => {
             try {
                 const configObj = TOML.parse(fileContents);
-                if (configObj && configObj.tool && (configObj.tool as TOML.JsonMap).pyright) {
-                    return (configObj.tool as TOML.JsonMap).pyright as object;
+                if (configObj && configObj.tool && (configObj.tool as TOML.JsonMap).mypyright) {
+                    return (configObj.tool as TOML.JsonMap).mypyright as object;
                 }
             } catch (e: any) {
                 this._console.error(`Pyproject file parse attempt ${attemptCount} error: ${JSON.stringify(e)}`);
@@ -1119,7 +1119,7 @@ export class AnalyzerService {
             }
 
             this._console.info(
-                `Pyproject file "${pyprojectPath.toUserVisibleString()}" has no "[tool.pyright]" section.`
+                `Pyproject file "${pyprojectPath.toUserVisibleString()}" has no "[tool.mypyright]" section.`
             );
             return undefined;
         });
