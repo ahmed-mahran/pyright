@@ -8,6 +8,7 @@
  */
 
 import { DiagnosticAddendum } from '../common/diagnostic';
+import { LocAddendum } from '../localization/localize';
 import { ExpressionNode, SliceNode } from '../parser/parseNodes';
 import { ConstraintTracker } from './constraintTracker';
 import { matchAccumulateSequence } from './sequenceMatching';
@@ -40,42 +41,103 @@ export function assignTupleTypeArgs(
     flags: AssignTypeFlags,
     recursionCount: number
 ) {
+    // A base case is when all repeated/intederminate args match zero
+    function getBaseCase(typeArgs: TupleTypeArg[]) {
+        return typeArgs.filter((arg) => !isIndeterminate(arg));
+    }
+
     const destTypeArgs = [...(destType.priv.tupleTypeArgs ?? [])];
     const srcTypeArgs = [...(srcType.priv.tupleTypeArgs ?? [])];
+    const destTypeArgsBaseCase = getBaseCase(destTypeArgs);
+    const srcTypeArgsBaseCase = getBaseCase(srcTypeArgs);
 
-    const matchedTypeArgs = matchTupleTypeArgs(
-        evaluator,
-        destTypeArgs,
-        srcTypeArgs,
-        constraints,
-        flags,
-        recursionCount
-    );
+    function doMatch(isBaseCase: boolean) {
+        return matchTupleTypeArgs(
+            evaluator,
+            destTypeArgs,
+            isBaseCase ? srcTypeArgsBaseCase : srcTypeArgs,
+            constraints,
+            flags,
+            recursionCount
+        );
+    }
 
-    //TODO: Handle diag on mismatch
-    if (matchedTypeArgs !== undefined && constraints && !constraints.isLocked()) {
-        const tupleClass = evaluator.getTupleClassType();
-        //TODO: check variance
-        matchedTypeArgs.forEach((pair) => {
-            if (pair.destSequence.length === 1 && isTypeVarTuple(pair.destSequence[0].type)) {
-                const srcArgType = createVariadicTuple(pair.srcSequence, tupleClass);
-                constraints.setBounds(pair.destSequence[0].type, srcArgType);
-            } else if (pair.srcSequence.length === 1 && isTypeVarTuple(pair.srcSequence[0].type)) {
-                const destArgType = createVariadicTuple(pair.destSequence, tupleClass);
-                constraints.setBounds(pair.srcSequence[0].type, destArgType);
-            } else if (pair.destSequence.length === pair.srcSequence.length) {
-                for (let i = 0; i < pair.destSequence.length; i++) {
-                    const destArg = pair.destSequence[i].type;
-                    const srcArg = pair.srcSequence[i].type;
-                    if (isTypeVar(destArg)) {
-                        constraints.setBounds(destArg, srcArg);
-                    } else if (isTypeVar(srcArg)) {
-                        constraints.setBounds(srcArg, destArg);
+    const matchedTypeArgs = doMatch(/* isBaseCase */ false);
+
+    if (matchedTypeArgs !== undefined) {
+        // E.g. tuple[*tuple[int, ...], int] is assignable to tuple[*tuple[int, ...]] but
+        // not the ineverse case; one-or-more ints is assignable to zero-or-more ints
+        // but zero-or-more ints is not assignable to one-or-more ints; because the base
+        // case zero int (empty) is not assignable to one-or-more ints while the base case
+        // one int is assignable to zero-or-more ints.
+        if (doMatch(/* isBaseCase */ true) === undefined) {
+            const isSrcIndeterminate = srcTypeArgs.length > srcTypeArgsBaseCase.length;
+            const isDestIndeterminate = destTypeArgs.length > destTypeArgsBaseCase.length;
+
+            if (isSrcIndeterminate && isDestIndeterminate) {
+                // tuple size mismatch; expected {destTypeArgsBaseCase.length} or more, but received {srcTypeArgsBaseCase.length} or more
+                diag?.addMessage(
+                    LocAddendum.tupleSizeMismatchIndeterminate().format({
+                        expected: destTypeArgsBaseCase.length,
+                        received: srcTypeArgsBaseCase.length,
+                    })
+                );
+            } else if (isSrcIndeterminate && !isDestIndeterminate) {
+                // tuple size mismatch; expected {destTypeArgs.length}, but received {srcTypeArgsBaseCase.length} or more
+                diag?.addMessage(
+                    LocAddendum.tupleSizeMismatchIndeterminateSrc().format({
+                        expected: destTypeArgs.length,
+                        received: srcTypeArgsBaseCase.length,
+                    })
+                );
+            } else if (!isSrcIndeterminate && isDestIndeterminate) {
+                // tuple size mismatch; expected {destTypeArgsBaseCase.length} or more, but received {srcTypeArgs.length}
+                diag?.addMessage(
+                    LocAddendum.tupleSizeMismatchIndeterminateDest().format({
+                        expected: destTypeArgsBaseCase.length,
+                        received: srcTypeArgs.length,
+                    })
+                );
+            } else if (!isSrcIndeterminate && !isDestIndeterminate) {
+                // tuple size mismatch; expected {destTypeArgs.length}, but received {srcTypeArgs.length}
+                diag?.addMessage(
+                    LocAddendum.tupleSizeMismatch().format({
+                        expected: destTypeArgs.length,
+                        received: srcTypeArgs.length,
+                    })
+                );
+            }
+
+            return false;
+        }
+
+        if (constraints && !constraints.isLocked()) {
+            const tupleClass = evaluator.getTupleClassType();
+            //TODO: check variance
+            matchedTypeArgs.forEach((pair) => {
+                if (pair.destSequence.length === 1 && isTypeVarTuple(pair.destSequence[0].type)) {
+                    const srcArgType = createVariadicTuple(pair.srcSequence, tupleClass);
+                    constraints.setBounds(pair.destSequence[0].type, srcArgType);
+                } else if (pair.srcSequence.length === 1 && isTypeVarTuple(pair.srcSequence[0].type)) {
+                    const destArgType = createVariadicTuple(pair.destSequence, tupleClass);
+                    constraints.setBounds(pair.srcSequence[0].type, destArgType);
+                } else if (pair.destSequence.length === pair.srcSequence.length) {
+                    for (let i = 0; i < pair.destSequence.length; i++) {
+                        const destArg = pair.destSequence[i].type;
+                        const srcArg = pair.srcSequence[i].type;
+                        if (isTypeVar(destArg)) {
+                            constraints.setBounds(destArg, srcArg);
+                        } else if (isTypeVar(srcArg)) {
+                            constraints.setBounds(srcArg, destArg);
+                        }
                     }
                 }
-            }
-        });
+            });
+        }
+
+        return true;
     }
+
     // if (adjustTupleTypeArgs(evaluator, destTypeArgs, srcTypeArgs, flags)) {
     //     for (let argIndex = 0; argIndex < srcTypeArgs.length; argIndex++) {
     //         const entryDiag = diag?.createAddendum();
@@ -151,7 +213,7 @@ export function assignTupleTypeArgs(
     //     return false;
     // }
 
-    return matchedTypeArgs !== undefined;
+    return false;
 }
 
 function createVariadicTuple(typeArgs: TupleTypeArg[], tupleClass: ClassType | undefined) {
@@ -176,6 +238,15 @@ function createVariadicTuple(typeArgs: TupleTypeArg[], tupleClass: ClassType | u
     return undefined;
 }
 
+function isIndeterminate(type: TupleTypeArg | undefined): boolean {
+    return (
+        type !== undefined &&
+        (type.isUnbounded ||
+            isTypeVarTuple(type.type) ||
+            (isClassInstance(type.type) && isTupleClass(type.type) && isUnboundedTupleClass(type.type) === true))
+    );
+}
+
 // Matches the source and dest type arguments list such that TypeVarTuples
 // from either list are matched to zero or more arguments from the other
 // list. Matching is performed in a greedy manner; such that one TypeVarTuple
@@ -191,15 +262,6 @@ export function matchTupleTypeArgs(
     flags: AssignTypeFlags,
     recursionCount: number
 ) {
-    const isIndeterminate = function (type: TupleTypeArg | undefined): boolean {
-        return (
-            type !== undefined &&
-            (type.isUnbounded ||
-                isTypeVarTuple(type.type) ||
-                (isClassInstance(type.type) && isTupleClass(type.type) && isUnboundedTupleClass(type.type) === true))
-        );
-    };
-
     const toStr = function (type: TupleTypeArg | undefined): string {
         return type !== undefined ? evaluator.printType(type.type) : 'undefined';
     };

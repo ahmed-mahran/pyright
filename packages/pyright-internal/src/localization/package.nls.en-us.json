@@ -776,6 +776,8 @@
         "tupleSizeIndeterminateSrc": "Tuple size mismatch; expected {expected} but received indeterminate",
         "tupleSizeIndeterminateSrcDest": "Tuple size mismatch; expected {expected} or more but received indeterminate",
         "tupleSizeMismatch": "Tuple size mismatch; expected {expected} but received {received}",
+        "tupleSizeMismatchIndeterminate": "Tuple size mismatch; expected {expected} or more but received {received} or more",
+        "tupleSizeMismatchIndeterminateSrc": "Tuple size mismatch; expected {expected} but received {received} or more",
         "tupleSizeMismatchIndeterminateDest": "Tuple size mismatch; expected {expected} or more but received {received}",
         "typeAliasInstanceCheck": "Type alias created with \"type\" statement cannot be used with instance and class checks",
         "typeAssignmentMismatch": "Type \"{sourceType}\" is incompatible with type \"{destType}\"",
