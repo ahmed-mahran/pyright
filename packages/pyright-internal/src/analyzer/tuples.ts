@@ -27,7 +27,14 @@ import {
     Type,
     TypeVarType,
 } from './types';
-import { AssignTypeFlags, isLiteralType, isTupleClass, isUnboundedTupleClass, specializeTupleClass } from './typeUtils';
+import {
+    AssignTypeFlags,
+    isLiteralType,
+    isTupleClass,
+    isTupleGradualForm,
+    isUnboundedTupleClass,
+    specializeTupleClass,
+} from './typeUtils';
 
 // Assigns the source type arguments to the dest type arguments. It assumed
 // the the caller has already verified that both the dest and source are
@@ -136,82 +143,80 @@ export function assignTupleTypeArgs(
         }
 
         return true;
+    } else if (adjustTupleTypeArgs(evaluator, destTypeArgs, srcTypeArgs, flags)) {
+        for (let argIndex = 0; argIndex < srcTypeArgs.length; argIndex++) {
+            const entryDiag = diag?.createAddendum();
+            const destArgType = destTypeArgs[argIndex].type;
+            const srcArgType = srcTypeArgs[argIndex].type;
+
+            // Handle the special case where the dest is a TypeVarTuple
+            // and the source is a `*tuple[Any, ...]`. This is allowed.
+            if (
+                isTypeVarTuple(destArgType) &&
+                destArgType.priv.isUnpacked &&
+                !destArgType.priv.isInUnion &&
+                isTupleGradualForm(srcArgType)
+            ) {
+                return true;
+            }
+
+            if (
+                !evaluator.assignType(
+                    destArgType,
+                    srcArgType,
+                    entryDiag?.createAddendum(),
+                    constraints,
+                    flags,
+                    recursionCount
+                )
+            ) {
+                if (entryDiag) {
+                    entryDiag.addMessage(
+                        LocAddendum.tupleEntryTypeMismatch().format({
+                            entry: argIndex + 1,
+                        })
+                    );
+                }
+                return false;
+            }
+        }
+    } else {
+        const isDestIndeterminate = destTypeArgs.some((t) => t.isUnbounded || isTypeVarTuple(t.type));
+
+        if (srcTypeArgs.some((t) => t.isUnbounded || isTypeVarTuple(t.type))) {
+            if (isDestIndeterminate) {
+                diag?.addMessage(
+                    LocAddendum.tupleSizeIndeterminateSrcDest().format({
+                        expected: destTypeArgs.length - 1,
+                    })
+                );
+            } else {
+                diag?.addMessage(
+                    LocAddendum.tupleSizeIndeterminateSrc().format({
+                        expected: destTypeArgs.length,
+                    })
+                );
+            }
+        } else {
+            if (isDestIndeterminate) {
+                diag?.addMessage(
+                    LocAddendum.tupleSizeMismatchIndeterminateDest().format({
+                        expected: destTypeArgs.length - 1,
+                        received: srcTypeArgs.length,
+                    })
+                );
+            } else {
+                diag?.addMessage(
+                    LocAddendum.tupleSizeMismatch().format({
+                        expected: destTypeArgs.length,
+                        received: srcTypeArgs.length,
+                    })
+                );
+            }
+        }
+
+        return false;
     }
-
-    // if (adjustTupleTypeArgs(evaluator, destTypeArgs, srcTypeArgs, flags)) {
-    //     for (let argIndex = 0; argIndex < srcTypeArgs.length; argIndex++) {
-    //         const entryDiag = diag?.createAddendum();
-    //         const destArgType = destTypeArgs[argIndex].type;
-    //         const srcArgType = srcTypeArgs[argIndex].type;
-
-    //         // Handle the special case where the dest is a TypeVarTuple
-    //         // and the source is a `*tuple[Any, ...]`. This is allowed.
-    //         if (
-    //             isTypeVarTuple(destArgType) &&
-    //             destArgType.priv.isUnpacked &&
-    //             !destArgType.priv.isInUnion &&
-    //             isTupleGradualForm(srcArgType)
-    //         ) {
-    //             return true;
-    //         }
-
-    //         if (
-    //             !evaluator.assignType(
-    //                 destArgType,
-    //                 srcArgType,
-    //                 entryDiag?.createAddendum(),
-    //                 constraints,
-    //                 flags,
-    //                 recursionCount
-    //             )
-    //         ) {
-    //             if (entryDiag) {
-    //                 entryDiag.addMessage(
-    //                     LocAddendum.tupleEntryTypeMismatch().format({
-    //                         entry: argIndex + 1,
-    //                     })
-    //                 );
-    //             }
-    //             return false;
-    //         }
-    //     }
-    // } else {
-    //     const isDestIndeterminate = destTypeArgs.some((t) => t.isUnbounded || isTypeVarTuple(t.type));
-
-    //     if (srcTypeArgs.some((t) => t.isUnbounded || isTypeVarTuple(t.type))) {
-    //         if (isDestIndeterminate) {
-    //             diag?.addMessage(
-    //                 LocAddendum.tupleSizeIndeterminateSrcDest().format({
-    //                     expected: destTypeArgs.length - 1,
-    //                 })
-    //             );
-    //         } else {
-    //             diag?.addMessage(
-    //                 LocAddendum.tupleSizeIndeterminateSrc().format({
-    //                     expected: destTypeArgs.length,
-    //                 })
-    //             );
-    //         }
-    //     } else {
-    //         if (isDestIndeterminate) {
-    //             diag?.addMessage(
-    //                 LocAddendum.tupleSizeMismatchIndeterminateDest().format({
-    //                     expected: destTypeArgs.length - 1,
-    //                     received: srcTypeArgs.length,
-    //                 })
-    //             );
-    //         } else {
-    //             diag?.addMessage(
-    //                 LocAddendum.tupleSizeMismatch().format({
-    //                     expected: destTypeArgs.length,
-    //                     received: srcTypeArgs.length,
-    //                 })
-    //             );
-    //         }
-    //     }
-
-    //     return false;
-    // }
 
     return false;
 }
