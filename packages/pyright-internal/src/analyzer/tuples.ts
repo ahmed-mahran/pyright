@@ -8,9 +8,9 @@
  */
 
 import { DiagnosticAddendum } from '../common/diagnostic';
-import { LocAddendum } from '../localization/localize';
 import { ExpressionNode, SliceNode } from '../parser/parseNodes';
 import { ConstraintTracker } from './constraintTracker';
+import { matchAccumulateSequence } from './sequenceMatching';
 import { TypeEvaluator } from './typeEvaluatorTypes';
 import {
     AnyType,
@@ -26,7 +26,7 @@ import {
     Type,
     TypeVarType,
 } from './types';
-import { AssignTypeFlags, isLiteralType, isTupleGradualForm, specializeTupleClass } from './typeUtils';
+import { AssignTypeFlags, isLiteralType, isTupleClass, isUnboundedTupleClass, specializeTupleClass } from './typeUtils';
 
 // Assigns the source type arguments to the dest type arguments. It assumed
 // the the caller has already verified that both the dest and source are
@@ -43,82 +43,213 @@ export function assignTupleTypeArgs(
     const destTypeArgs = [...(destType.priv.tupleTypeArgs ?? [])];
     const srcTypeArgs = [...(srcType.priv.tupleTypeArgs ?? [])];
 
-    if (adjustTupleTypeArgs(evaluator, destTypeArgs, srcTypeArgs, flags)) {
-        for (let argIndex = 0; argIndex < srcTypeArgs.length; argIndex++) {
-            const entryDiag = diag?.createAddendum();
-            const destArgType = destTypeArgs[argIndex].type;
-            const srcArgType = srcTypeArgs[argIndex].type;
+    const matchedTypeArgs = matchTupleTypeArgs(
+        evaluator,
+        destTypeArgs,
+        srcTypeArgs,
+        constraints,
+        flags,
+        recursionCount
+    );
 
-            // Handle the special case where the dest is a TypeVarTuple
-            // and the source is a `*tuple[Any, ...]`. This is allowed.
-            if (
-                isTypeVarTuple(destArgType) &&
-                destArgType.priv.isUnpacked &&
-                !destArgType.priv.isInUnion &&
-                isTupleGradualForm(srcArgType)
-            ) {
-                return true;
+    //TODO: Handle diag on mismatch
+    if (matchedTypeArgs !== undefined && constraints && !constraints.isLocked()) {
+        const tupleClass = evaluator.getTupleClassType();
+        //TODO: check variance
+        matchedTypeArgs.forEach((pair) => {
+            if (pair.destSequence.length === 1 && isTypeVarTuple(pair.destSequence[0].type)) {
+                const srcArgType = createVariadicTuple(pair.srcSequence, tupleClass);
+                constraints.setBounds(pair.destSequence[0].type, srcArgType);
+            } else if (pair.srcSequence.length === 1 && isTypeVarTuple(pair.srcSequence[0].type)) {
+                const destArgType = createVariadicTuple(pair.destSequence, tupleClass);
+                constraints.setBounds(pair.srcSequence[0].type, destArgType);
+            } else if (pair.destSequence.length === pair.srcSequence.length) {
+                for (let i = 0; i < pair.destSequence.length; i++) {
+                    const destArg = pair.destSequence[i].type;
+                    const srcArg = pair.srcSequence[i].type;
+                    if (isTypeVar(destArg)) {
+                        constraints.setBounds(destArg, srcArg);
+                    } else if (isTypeVar(srcArg)) {
+                        constraints.setBounds(srcArg, destArg);
+                    }
+                }
             }
+        });
+    }
+    // if (adjustTupleTypeArgs(evaluator, destTypeArgs, srcTypeArgs, flags)) {
+    //     for (let argIndex = 0; argIndex < srcTypeArgs.length; argIndex++) {
+    //         const entryDiag = diag?.createAddendum();
+    //         const destArgType = destTypeArgs[argIndex].type;
+    //         const srcArgType = srcTypeArgs[argIndex].type;
 
-            if (
-                !evaluator.assignType(
-                    destArgType,
-                    srcArgType,
-                    entryDiag?.createAddendum(),
-                    constraints,
+    //         // Handle the special case where the dest is a TypeVarTuple
+    //         // and the source is a `*tuple[Any, ...]`. This is allowed.
+    //         if (
+    //             isTypeVarTuple(destArgType) &&
+    //             destArgType.priv.isUnpacked &&
+    //             !destArgType.priv.isInUnion &&
+    //             isTupleGradualForm(srcArgType)
+    //         ) {
+    //             return true;
+    //         }
+
+    //         if (
+    //             !evaluator.assignType(
+    //                 destArgType,
+    //                 srcArgType,
+    //                 entryDiag?.createAddendum(),
+    //                 constraints,
+    //                 flags,
+    //                 recursionCount
+    //             )
+    //         ) {
+    //             if (entryDiag) {
+    //                 entryDiag.addMessage(
+    //                     LocAddendum.tupleEntryTypeMismatch().format({
+    //                         entry: argIndex + 1,
+    //                     })
+    //                 );
+    //             }
+    //             return false;
+    //         }
+    //     }
+    // } else {
+    //     const isDestIndeterminate = destTypeArgs.some((t) => t.isUnbounded || isTypeVarTuple(t.type));
+
+    //     if (srcTypeArgs.some((t) => t.isUnbounded || isTypeVarTuple(t.type))) {
+    //         if (isDestIndeterminate) {
+    //             diag?.addMessage(
+    //                 LocAddendum.tupleSizeIndeterminateSrcDest().format({
+    //                     expected: destTypeArgs.length - 1,
+    //                 })
+    //             );
+    //         } else {
+    //             diag?.addMessage(
+    //                 LocAddendum.tupleSizeIndeterminateSrc().format({
+    //                     expected: destTypeArgs.length,
+    //                 })
+    //             );
+    //         }
+    //     } else {
+    //         if (isDestIndeterminate) {
+    //             diag?.addMessage(
+    //                 LocAddendum.tupleSizeMismatchIndeterminateDest().format({
+    //                     expected: destTypeArgs.length - 1,
+    //                     received: srcTypeArgs.length,
+    //                 })
+    //             );
+    //         } else {
+    //             diag?.addMessage(
+    //                 LocAddendum.tupleSizeMismatch().format({
+    //                     expected: destTypeArgs.length,
+    //                     received: srcTypeArgs.length,
+    //                 })
+    //             );
+    //         }
+    //     }
+
+    //     return false;
+    // }
+
+    return matchedTypeArgs !== undefined;
+}
+
+function createVariadicTuple(typeArgs: TupleTypeArg[], tupleClass: ClassType | undefined) {
+    if (tupleClass && isInstantiableClass(tupleClass)) {
+        const tuple = ClassType.cloneAsInstance(
+            specializeTupleClass(
+                tupleClass,
+                typeArgs.map((typeArg) => {
+                    return {
+                        type: typeArg.type,
+                        isUnbounded: typeArg.isUnbounded,
+                        isOptional: typeArg.isOptional,
+                    };
+                }),
+                /* isTypeArgExplicit */ true,
+                /* isUnpacked */ true
+            )
+        );
+        tuple.priv.isEmptyContainer = typeArgs.length === 0;
+        return tuple;
+    }
+    return undefined;
+}
+
+// Matches the source and dest type arguments list such that TypeVarTuples
+// from either list are matched to zero or more arguments from the other
+// list. Matching is performed in a greedy manner; such that one TypeVarTuple
+// from one list matches as most arguments from the other list as possible.
+// If no arguments matches for a given TypeVarTuple, then an empty unpacked
+// tuple is assumed.
+// It returns list of matches, or undefined otherwise.
+export function matchTupleTypeArgs(
+    evaluator: TypeEvaluator,
+    destTypeArgs: TupleTypeArg[],
+    srcTypeArgs: TupleTypeArg[],
+    constraints: ConstraintTracker | undefined,
+    flags: AssignTypeFlags,
+    recursionCount: number
+) {
+    const isRepeated = function (type: TupleTypeArg | undefined): boolean {
+        return (
+            type !== undefined &&
+            (isTypeVarTuple(type.type) ||
+                (isClassInstance(type.type) && isTupleClass(type.type) && isUnboundedTupleClass(type.type) === true))
+        );
+    };
+
+    const toStr = function (type: TupleTypeArg | undefined): string {
+        return type !== undefined ? evaluator.printType(type.type) : 'undefined';
+    };
+
+    const memo = new Map<string, boolean>();
+    const matches = function (destType: TupleTypeArg | undefined, srcType: TupleTypeArg | undefined): boolean {
+        const key = `${toStr(destType)}|${toStr(srcType)}`;
+        let res = memo.get(key);
+        if (res !== undefined) {
+            return res;
+        } else {
+            res =
+                destType !== undefined &&
+                srcType !== undefined &&
+                evaluator.assignType(
+                    destType.type,
+                    srcType.type,
+                    /* diag */ undefined,
+                    // matching repeated VS non-repeated needs to build up new constraints,
+                    // as the repeated element is collecting more non-repeated elements
+                    (isRepeated(destType) && isRepeated(srcType)) || !(isRepeated(destType) || isRepeated(srcType))
+                        ? constraints
+                        : new ConstraintTracker(),
                     flags,
                     recursionCount
-                )
-            ) {
-                if (entryDiag) {
-                    entryDiag.addMessage(
-                        LocAddendum.tupleEntryTypeMismatch().format({
-                            entry: argIndex + 1,
-                        })
-                    );
-                }
-                return false;
-            }
+                );
+            memo.set(key, res);
+            return res;
         }
-    } else {
-        const isDestIndeterminate = destTypeArgs.some((t) => t.isUnbounded || isTypeVarTuple(t.type));
+    };
 
-        if (srcTypeArgs.some((t) => t.isUnbounded || isTypeVarTuple(t.type))) {
-            if (isDestIndeterminate) {
-                diag?.addMessage(
-                    LocAddendum.tupleSizeIndeterminateSrcDest().format({
-                        expected: destTypeArgs.length - 1,
-                    })
-                );
-            } else {
-                diag?.addMessage(
-                    LocAddendum.tupleSizeIndeterminateSrc().format({
-                        expected: destTypeArgs.length,
-                    })
-                );
-            }
-        } else {
-            if (isDestIndeterminate) {
-                diag?.addMessage(
-                    LocAddendum.tupleSizeMismatchIndeterminateDest().format({
-                        expected: destTypeArgs.length - 1,
-                        received: srcTypeArgs.length,
-                    })
-                );
-            } else {
-                diag?.addMessage(
-                    LocAddendum.tupleSizeMismatch().format({
-                        expected: destTypeArgs.length,
-                        received: srcTypeArgs.length,
-                    })
-                );
-            }
-        }
-
-        return false;
+    // We are testing combinations of matches, so we don't want to change any constraints
+    // based on any invalid combinations.
+    const wasLocked = constraints?.isLocked();
+    if (!wasLocked) {
+        constraints?.lock();
+    }
+    const matchedTypeArgs = matchAccumulateSequence<TupleTypeArg, TupleTypeArg>(
+        destTypeArgs,
+        srcTypeArgs,
+        isRepeated,
+        isRepeated,
+        matches,
+        toStr,
+        toStr
+    );
+    if (!wasLocked) {
+        constraints?.unlock();
     }
 
-    return true;
+    return matchedTypeArgs;
 }
 
 // Adjusts the source and/or dest type arguments list to attempt to match
