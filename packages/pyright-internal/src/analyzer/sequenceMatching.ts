@@ -351,11 +351,18 @@ export function traverseAccumulateSequence<A, B, Acc>(
     */
 
     const baseline = function (indent: string, content: string) {
-        // console.error(`[acc_sequence] ${indent}${content}`);
+        console.error(`[acc_sequence] ${indent}${content}`);
         return;
     };
 
-    baseline('', `[${a_sequence.map(a_str).join(';')}] ==?== [${b_sequence.map(b_str).join(';')}]`);
+    const _a_str = (a: A | undefined): string => {
+        return `${a_str(a)}${is_repeated_a(a) ? '*' : ''}`;
+    };
+    const _b_str = (b: B | undefined): string => {
+        return `${b_str(b)}${is_repeated_b(b) ? '*' : ''}`;
+    };
+
+    baseline('', `[${a_sequence.map(_a_str).join(';')}] ==?== [${b_sequence.map(_b_str).join(';')}]`);
 
     const step = function (
         i: number,
@@ -385,9 +392,9 @@ export function traverseAccumulateSequence<A, B, Acc>(
             right.push(b_j);
         }
         line(
-            `step(${left.map(a_str).join(', ')} <=> ${right.map(b_str).join(', ')} || ${i}: ${a_str(
+            `step(${left.map(_a_str).join(', ')} <=> ${right.map(_b_str).join(', ')} || ${i}: ${_a_str(
                 a_i
-            )}, ${j}: ${b_str(b_j)})`
+            )}, ${j}: ${_b_str(b_j)})`
         );
 
         // both have terminated, that's a match

@@ -191,10 +191,11 @@ export function matchTupleTypeArgs(
     flags: AssignTypeFlags,
     recursionCount: number
 ) {
-    const isRepeated = function (type: TupleTypeArg | undefined): boolean {
+    const isIndeterminate = function (type: TupleTypeArg | undefined): boolean {
         return (
             type !== undefined &&
-            (isTypeVarTuple(type.type) ||
+            (type.isUnbounded ||
+                isTypeVarTuple(type.type) ||
                 (isClassInstance(type.type) && isTupleClass(type.type) && isUnboundedTupleClass(type.type) === true))
         );
     };
@@ -219,7 +220,8 @@ export function matchTupleTypeArgs(
                     /* diag */ undefined,
                     // matching repeated VS non-repeated needs to build up new constraints,
                     // as the repeated element is collecting more non-repeated elements
-                    (isRepeated(destType) && isRepeated(srcType)) || !(isRepeated(destType) || isRepeated(srcType))
+                    (isIndeterminate(destType) && isIndeterminate(srcType)) ||
+                        !(isIndeterminate(destType) || isIndeterminate(srcType))
                         ? constraints
                         : new ConstraintTracker(),
                     flags,
@@ -239,8 +241,8 @@ export function matchTupleTypeArgs(
     const matchedTypeArgs = matchAccumulateSequence<TupleTypeArg, TupleTypeArg>(
         destTypeArgs,
         srcTypeArgs,
-        isRepeated,
-        isRepeated,
+        isIndeterminate,
+        isIndeterminate,
         matches,
         toStr,
         toStr
