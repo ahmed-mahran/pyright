@@ -24,7 +24,7 @@ module.exports = (_, { mode }) => {
             path: outPath,
             libraryTarget: 'commonjs2',
             devtoolModuleFilenameTemplate:
-                mode === 'development' ? '../[resource-path]' : monorepoResourceNameMapper('vscode-pyright'),
+                mode === 'development' ? '../[resource-path]' : monorepoResourceNameMapper('vscode-mypyright'),
             clean: true,
         },
         devtool: mode === 'development' ? 'source-map' : 'nosources-source-map',
