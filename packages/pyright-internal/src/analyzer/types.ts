@@ -2960,7 +2960,7 @@ export namespace TypeVarType {
         return clone;
     }
 
-    // Indicates that the type var is a "free" or unbound type var. Free
+    // Indicates that the type var is a "free" or bound type var. Free
     // type variables can be solved whereas bound type vars are already bound
     // to a value.
     export function isBound(type: TypeVarType) {
