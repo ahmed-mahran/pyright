@@ -72,12 +72,17 @@ export function assignTupleTypeArgs(
     const matchedTypeArgs = doMatch(/* isBaseCase */ false);
 
     if (matchedTypeArgs !== undefined) {
+        // Handle the special case where the dest is a TypeVarTuple
+        // and the source is a `*tuple[Any, ...]`. This is allowed.
+        const isTupleGradualFormSrcTypeArg =
+            srcTypeArgs.length === 1 && isAnyOrUnknown(srcTypeArgs[0].type) && srcTypeArgs[0].isUnbounded;
+
         // E.g. tuple[*tuple[int, ...], int] is assignable to tuple[*tuple[int, ...]] but
         // not the ineverse case; one-or-more ints is assignable to zero-or-more ints
         // but zero-or-more ints is not assignable to one-or-more ints; because the base
         // case zero int (empty) is not assignable to one-or-more ints while the base case
         // one int is assignable to zero-or-more ints.
-        if (doMatch(/* isBaseCase */ true) === undefined) {
+        if (!isTupleGradualFormSrcTypeArg && doMatch(/* isBaseCase */ true) === undefined) {
             const isSrcIndeterminate = srcTypeArgs.length > srcTypeArgsBaseCase.length;
             const isDestIndeterminate = destTypeArgs.length > destTypeArgsBaseCase.length;
 
@@ -277,10 +282,17 @@ export function matchTupleTypeArgs(
         let res = memo.get(key);
         if (res !== undefined) {
             return res;
-        } else {
+        } else if (destType !== undefined && srcType !== undefined) {
+            // Unbound and unconstrained unpacked dest TypeVarTuple
+            // can accept any singular src
+            const isDestVariadicAndSrcSingular =
+                isTypeVarTuple(destType.type) &&
+                !!destType.type.priv.isUnpacked &&
+                !TypeVarType.hasBound(destType.type) &&
+                !TypeVarType.hasConstraints(destType.type) &&
+                !isIndeterminate(srcType);
             res =
-                destType !== undefined &&
-                srcType !== undefined &&
+                isDestVariadicAndSrcSingular ||
                 evaluator.assignType(
                     destType.type,
                     srcType.type,
@@ -296,6 +308,9 @@ export function matchTupleTypeArgs(
                 );
             memo.set(key, res);
             return res;
+        } else {
+            memo.set(key, false);
+            return false;
         }
     };
 
