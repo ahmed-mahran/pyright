@@ -27,36 +27,26 @@ async function modifyJsonInPlace(filepath, modifier) {
     await fsAsync.writeFile(filepath, output, 'utf-8');
 }
 
-async function main() {
-    const version = process.argv[2];
-    await modifyJsonInPlace('package.json', (obj) => {
+/**
+ * @param {string} path
+ * @param {string} version
+ */
+async function setVersionFor(path, version) {
+    await modifyJsonInPlace(path + 'package.json', (obj) => {
         obj.version = version;
-    })
-        .then(() =>
-            modifyJsonInPlace('package-lock.json', (obj) => {
-                obj.packages[''].version = version;
-            })
-        )
-        .then(() =>
-            modifyJsonInPlace('../pyright-internal/package.json', (obj) => {
-                obj.version = version;
-            })
-        )
-        .then(() =>
-            modifyJsonInPlace('../pyright-internal/package-lock.json', (obj) => {
-                obj.packages[''].version = version;
-            })
-        )
-        .then(() =>
-            modifyJsonInPlace('../pyright/package.json', (obj) => {
-                obj.version = version;
-            })
-        )
-        .then(() =>
-            modifyJsonInPlace('../pyright/package-lock.json', (obj) => {
-                obj.packages[''].version = version;
-            })
-        );
+    }).then(() =>
+        modifyJsonInPlace(path + 'package-lock.json', (obj) => {
+            obj.packages[''].version = version;
+        })
+    );
+}
+
+async function main() {
+    const mypyrightVersion = process.argv[2];
+    const pyrightVersion = process.argv[3];
+    await setVersionFor('', mypyrightVersion)
+        .then(() => setVersionFor('../pyright-internal/', pyrightVersion))
+        .then(() => setVersionFor('../pyright/', pyrightVersion));
 }
 
 main();
