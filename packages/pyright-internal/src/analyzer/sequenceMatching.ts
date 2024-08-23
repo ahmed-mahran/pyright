@@ -369,28 +369,18 @@ export function traverseAccumulateSequence<A, B, Acc>(
         j: number,
         acc: SequenceAccumulator<A, B, Acc>,
         indent: string,
-        _left: A[],
-        _right: B[]
+        left: (A | undefined)[],
+        right: (B | undefined)[]
     ): SequenceAccumulator<A, B, Acc> | undefined {
         const line = function (content: string) {
             return baseline(indent, content);
         };
 
-        const left: A[] = [];
-        const right: B[] = [];
         const a_i = i < a_sequence.length ? a_sequence[i] : undefined;
         const b_j = j < b_sequence.length ? b_sequence[j] : undefined;
         const is_repeated_a_i = is_repeated_a(a_i);
         const is_repeated_b_j = is_repeated_b(b_j);
 
-        if (a_i !== undefined) {
-            left.push(..._left);
-            left.push(a_i);
-        }
-        if (b_j !== undefined) {
-            right.push(..._right);
-            right.push(b_j);
-        }
         line(
             `step(${left.map(_a_str).join(', ')} <=> ${right.map(_b_str).join(', ')} || ${i}: ${_a_str(
                 a_i
@@ -409,7 +399,14 @@ export function traverseAccumulateSequence<A, B, Acc>(
             if (is_repeated_b_j) {
                 if (acc.matches(undefined, b_j)) {
                     line('* i terminated but j is repeated');
-                    return step(i, j + 1, acc.accumulate(undefined, b_j), indent + '-', left, right);
+                    return step(
+                        i,
+                        j + 1,
+                        acc.accumulate(undefined, b_j),
+                        indent + '-',
+                        [...left, a_i],
+                        [...right, b_j]
+                    );
                 } else {
                     line('[REJECT] i terminated and j is repeated but not accepted');
                     return undefined;
@@ -425,7 +422,14 @@ export function traverseAccumulateSequence<A, B, Acc>(
             if (is_repeated_a_i) {
                 if (acc.matches(a_i, undefined)) {
                     line('* j terminated but i is repeated');
-                    return step(i + 1, j, acc.accumulate(a_i, undefined), indent + '-', left, right);
+                    return step(
+                        i + 1,
+                        j,
+                        acc.accumulate(a_i, undefined),
+                        indent + '-',
+                        [...left, a_i],
+                        [...right, b_j]
+                    );
                 } else {
                     line('[REJECT] j terminated and i is repeated but not accepted');
                     return undefined;
@@ -457,29 +461,41 @@ export function traverseAccumulateSequence<A, B, Acc>(
         line(`* steps: ${steps.map((s) => `(${s.i_step}, ${s.j_step})`).join(', ')}`);
         for (const next_step of steps) {
             let new_acc;
+            let new_left;
+            let new_right;
             // Handle skip connections; if we are staying at a non-repeating node, we shouldn't accumulate it twice
             if (next_step.i_step === i && !is_repeated_a_i) {
                 if (is_repeated_b_j) {
                     // Skip, but match b_j with nothing
                     new_acc = acc.accumulate(undefined, b_j);
+                    new_left = [...left, undefined];
+                    new_right = [...right, b_j];
                 } else {
                     // Skip, and implicilty reject the current step
                     new_acc = acc.copy();
+                    new_left = left;
+                    new_right = right;
                 }
             } else if (next_step.j_step === j && !is_repeated_b_j) {
                 if (is_repeated_a_i) {
                     // Skip, but match a_i with nothing
                     new_acc = acc.accumulate(a_i, undefined);
+                    new_left = [...left, a_i];
+                    new_right = [...right, undefined];
                 } else {
                     // Skip, and implicilty reject the current step
                     new_acc = acc.copy();
+                    new_left = left;
+                    new_right = right;
                 }
             } else {
                 // Accept, and accumulate the current step
                 new_acc = acc.accumulate(a_i, b_j);
+                new_left = [...left, a_i];
+                new_right = [...right, b_j];
             }
             // we have found a match in one of the possible next steps
-            const step_res = step(next_step.i_step, next_step.j_step, new_acc, indent + '-', left, right);
+            const step_res = step(next_step.i_step, next_step.j_step, new_acc, indent + '-', new_left, new_right);
             if (step_res !== undefined) {
                 return step_res;
             }
