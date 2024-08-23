@@ -1,5 +1,9 @@
 ![Pyright](https://github.com/microsoft/pyright/blob/main/docs/img/PyrightLarge.png)
 
+# Static Type Checker for Tensors
+
+This is a fork of [Pyright](https://github.com/microsoft/pyright) with added features beyond accepted [typing PEPs](https://peps.python.org/topic/typing/) to support [typed tensors](https://github.com/ahmed-mahran/typedtensor).
+
 # Static Type Checker for Python
 
 Pyright is a full-featured, standards-based static type checker for Python. It is designed for high performance and can be used with large Python source bases.
