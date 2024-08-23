@@ -253,7 +253,7 @@ function isIndeterminate(type: TupleTypeArg | undefined): boolean {
         type !== undefined &&
         (type.isUnbounded ||
             isTypeVarTuple(type.type) ||
-            (isClassInstance(type.type) && isTupleClass(type.type) && isUnboundedTupleClass(type.type) === true))
+            (isClassInstance(type.type) && isTupleClass(type.type) && !!isUnboundedTupleClass(type.type)))
     );
 }
 
@@ -273,7 +273,9 @@ export function matchTupleTypeArgs(
     recursionCount: number
 ) {
     const toStr = function (type: TupleTypeArg | undefined): string {
-        return type !== undefined ? evaluator.printType(type.type) : 'undefined';
+        return type !== undefined
+            ? `${evaluator.printType(type.type)}${isIndeterminate(type) ? '*' : ''}`
+            : 'undefined';
     };
 
     const memo = new Map<string, boolean>();

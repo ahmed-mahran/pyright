@@ -17,6 +17,8 @@ export interface SequenceAccumulator<DestType, SrcType, Acc> {
     accumulate(dest: DestType | undefined, src: SrcType | undefined): this;
 
     copy(): this;
+
+    toString(): string;
 }
 
 export function matchSequence<DestType, SrcType>(
@@ -59,6 +61,10 @@ export function matchSequence<DestType, SrcType>(
             const cp = new MatchSequenceAccumulator();
             cp.acc = this.acc;
             return cp as this;
+        }
+
+        toString(): string {
+            return `${this.acc}`;
         }
     }
 
@@ -179,6 +185,15 @@ export function matchAccumulateSequence<DestType, SrcType>(
             return cp as this;
         }
 
+        toString(): string {
+            return `{${this.acc
+                .map(
+                    (acc) =>
+                        `[${acc.destSequence.map(destStr).join(';')}] == [${acc.srcSequence.map(srcStr).join(';')}]`
+                )
+                .join(';')}}`;
+        }
+
         private _withLastAcc<R>(
             onEmpty: () => R,
             withLast: (last: { destSequence: DestType[]; srcSequence: SrcType[] }) => R
@@ -212,7 +227,8 @@ export function getCommonSequence<DestType, SrcType, CommonType>(
     isRepeatedCommon: (common: CommonType | undefined) => boolean,
     getCommon: (dest: DestType | undefined, src: SrcType | undefined) => CommonType | undefined,
     destStr: (dest: DestType | undefined) => string,
-    srcStr: (src: SrcType | undefined) => string
+    srcStr: (src: SrcType | undefined) => string,
+    commonStr: (common: CommonType | undefined) => string
 ): CommonType[] | undefined {
     class CommonSequenceAccumulator implements SequenceAccumulator<DestType, SrcType, CommonType[]> {
         acc: CommonType[];
@@ -248,6 +264,10 @@ export function getCommonSequence<DestType, SrcType, CommonType>(
             const cp = new CommonSequenceAccumulator();
             cp.acc = [...this.acc];
             return cp as this;
+        }
+
+        toString(): string {
+            return `[${this.acc.map(commonStr).join(';')}]`;
         }
     }
 
@@ -351,18 +371,11 @@ export function traverseAccumulateSequence<A, B, Acc>(
     */
 
     const baseline = function (indent: string, content: string) {
-        console.error(`[acc_sequence] ${indent}${content}`);
+        console.debug(`[acc_sequence] ${indent}${content}`);
         return;
     };
 
-    const _a_str = (a: A | undefined): string => {
-        return `${a_str(a)}${is_repeated_a(a) ? '*' : ''}`;
-    };
-    const _b_str = (b: B | undefined): string => {
-        return `${b_str(b)}${is_repeated_b(b) ? '*' : ''}`;
-    };
-
-    baseline('', `[${a_sequence.map(_a_str).join(';')}] ==?== [${b_sequence.map(_b_str).join(';')}]`);
+    baseline('', `[${a_sequence.map(a_str).join(';')}] ==?== [${b_sequence.map(b_str).join(';')}]`);
 
     const step = function (
         i: number,
@@ -382,9 +395,9 @@ export function traverseAccumulateSequence<A, B, Acc>(
         const is_repeated_b_j = is_repeated_b(b_j);
 
         line(
-            `step(${left.map(_a_str).join(', ')} <=> ${right.map(_b_str).join(', ')} || ${i}: ${_a_str(
+            `step(${left.map(a_str).join(', ')} <=> ${right.map(b_str).join(', ')} || ${i}: ${a_str(
                 a_i
-            )}, ${j}: ${_b_str(b_j)})`
+            )}, ${j}: ${b_str(b_j)})`
         );
 
         // both have terminated, that's a match
@@ -504,5 +517,12 @@ export function traverseAccumulateSequence<A, B, Acc>(
         return undefined;
     };
 
-    return step(0, 0, acc, '', [], []);
+    const result = step(0, 0, acc, '', [], []);
+
+    baseline(
+        '',
+        `[${a_sequence.map(a_str).join(';')}] ==?== [${b_sequence.map(b_str).join(';')}] ==> ${result?.toString()}`
+    );
+
+    return result;
 }
