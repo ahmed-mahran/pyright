@@ -57,6 +57,7 @@ import {
     ReferenceParams,
     RemoteWindow,
     RenameParams,
+    ResultProgressReporter,
     SignatureHelp,
     SignatureHelpParams,
     SymbolInformation,
@@ -68,7 +69,6 @@ import {
     WorkspaceSymbol,
     WorkspaceSymbolParams,
 } from 'vscode-languageserver';
-import { ResultProgressReporter } from 'vscode-languageserver';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { AnalysisResults } from './analyzer/analysis';
@@ -123,8 +123,8 @@ import { WorkspaceSymbolProvider } from './languageService/workspaceSymbolProvid
 import { Localizer, setLocaleOverride } from './localization/localize';
 import { ParseFileResults } from './parser/parser';
 import {
-    InitStatus,
     IWorkspaceFactory,
+    InitStatus,
     WellKnownWorkspaceKinds,
     Workspace,
     WorkspaceFactory,
@@ -1204,7 +1204,9 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
     protected onWorkspaceCreated(workspace: Workspace) {
         // Update settings on this workspace (but only if initialize has happened)
         if (this._initialized) {
-            this.updateSettingsForWorkspace(workspace, workspace.isInitialized).ignoreErrors();
+            this.updateSettingsForWorkspace(workspace, workspace.isInitialized).catch((e) => {
+                console.log(e);
+            });
         }
 
         // Otherwise the initialize completion should cause settings to be updated on all workspaces.
