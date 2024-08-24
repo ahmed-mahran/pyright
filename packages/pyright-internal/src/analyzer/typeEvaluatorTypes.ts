@@ -514,7 +514,12 @@ export interface TypeEvaluator {
     getTypeResult: (node: ExpressionNode) => TypeResult | undefined;
     getTypeResultForDecorator: (node: DecoratorNode) => TypeResult | undefined;
     getCachedType: (node: ExpressionNode) => Type | undefined;
-    getTypeOfExpression: (node: ExpressionNode, flags?: EvalFlags, context?: InferenceContext) => TypeResult;
+    getTypeOfExpression: (
+        node: ExpressionNode,
+        flags?: EvalFlags,
+        constraints?: ConstraintTracker,
+        context?: InferenceContext
+    ) => TypeResult;
     getTypeOfAnnotation: (node: ExpressionNode, options?: ExpectedTypeOptions) => Type;
     getTypeOfClass: (node: ClassNode) => ClassTypeResult | undefined;
     createSubclass: (errorNode: ExpressionNode, type1: ClassType, type2: ClassType) => ClassType;

@@ -301,6 +301,7 @@ export function getTypeOfBinaryOperation(
     const leftTypeResult = evaluator.getTypeOfExpression(
         leftExpression,
         flags,
+        /* constraints */ undefined,
         makeInferenceContext(effectiveExpectedType)
     );
     let leftType = leftTypeResult.type;
@@ -338,6 +339,7 @@ export function getTypeOfBinaryOperation(
     const rightTypeResult = evaluator.getTypeOfExpression(
         rightExpression,
         flags,
+        /* constraints */ undefined,
         makeInferenceContext(expectedOperandType)
     );
     let rightType = rightTypeResult.type;
@@ -590,6 +592,7 @@ export function getTypeOfAugmentedAssignment(
     const rightTypeResult = evaluator.getTypeOfExpression(
         node.d.rightExpr,
         /* flags */ undefined,
+        /* constraints */ undefined,
         makeInferenceContext(expectedOperandType)
     );
     const rightType = rightTypeResult.type;
@@ -885,7 +888,12 @@ export function getTypeOfTernaryOperation(
     );
 
     if (constExprValue !== false && evaluator.isNodeReachable(node.d.ifExpr)) {
-        const ifType = evaluator.getTypeOfExpression(node.d.ifExpr, flags, inferenceContext);
+        const ifType = evaluator.getTypeOfExpression(
+            node.d.ifExpr,
+            flags,
+            /* constraints */ undefined,
+            inferenceContext
+        );
         typesToCombine.push(ifType.type);
         if (ifType.isIncomplete) {
             isIncomplete = true;
@@ -896,7 +904,12 @@ export function getTypeOfTernaryOperation(
     }
 
     if (constExprValue !== true && evaluator.isNodeReachable(node.d.elseExpr)) {
-        const elseType = evaluator.getTypeOfExpression(node.d.elseExpr, flags, inferenceContext);
+        const elseType = evaluator.getTypeOfExpression(
+            node.d.elseExpr,
+            flags,
+            /* constraints */ undefined,
+            inferenceContext
+        );
         typesToCombine.push(elseType.type);
         if (elseType.isIncomplete) {
             isIncomplete = true;

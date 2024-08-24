@@ -246,6 +246,7 @@ function applyPartialTransformToFunction(
                     const argTypeResult = evaluator.getTypeOfExpression(
                         arg.valueExpression,
                         /* flags */ undefined,
+                        /* constraints */ undefined,
                         makeInferenceContext(paramType)
                     );
 
@@ -292,6 +293,7 @@ function applyPartialTransformToFunction(
                 const argTypeResult = evaluator.getTypeOfExpression(
                     arg.valueExpression,
                     /* flags */ undefined,
+                    /* constraints */ undefined,
                     makeInferenceContext(paramType)
                 );
 
@@ -341,6 +343,7 @@ function applyPartialTransformToFunction(
                     const argTypeResult = evaluator.getTypeOfExpression(
                         arg.valueExpression,
                         /* flags */ undefined,
+                        /* constraints */ undefined,
                         makeInferenceContext(paramType)
                     );
 
@@ -381,6 +384,7 @@ function applyPartialTransformToFunction(
                     const argTypeResult = evaluator.getTypeOfExpression(
                         arg.valueExpression,
                         /* flags */ undefined,
+                        /* constraints */ undefined,
                         makeInferenceContext(paramType)
                     );
 

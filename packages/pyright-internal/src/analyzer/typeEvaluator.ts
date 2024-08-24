@@ -85,7 +85,7 @@ import {
     YieldFromNode,
     YieldNode,
 } from '../parser/parseNodes';
-import { ParseOptions, ParseTextMode, Parser } from '../parser/parser';
+import { ParseOptions, Parser, ParseTextMode } from '../parser/parser';
 import { KeywordType, OperatorType, StringTokenFlags } from '../parser/tokenizerTypes';
 import { AnalyzerFileInfo, ImportLookup, isAnnotationEvaluationPostponed } from './analyzerFileInfo';
 import * as AnalyzerNodeInfo from './analyzerNodeInfo';
@@ -1024,6 +1024,7 @@ export function createTypeEvaluator(
     function getTypeOfExpression(
         node: ExpressionNode,
         flags = EvalFlags.None,
+        constraints: ConstraintTracker | undefined,
         inferenceContext?: InferenceContext
     ): TypeResult {
         // Is this type already cached?
@@ -1083,7 +1084,7 @@ export function createTypeEvaluator(
         // at that point.
         initializePrefetchedTypes(node);
 
-        let typeResult = getTypeOfExpressionCore(node, flags, inferenceContext);
+        let typeResult = getTypeOfExpressionCore(node, flags, inferenceContext, constraints);
 
         // Should we disable type promotions for bytes?
         if (
@@ -1129,7 +1130,7 @@ export function createTypeEvaluator(
                         inferenceContext.expectedType,
                         typeResult.type,
                         diag,
-                        /* constraints */ undefined,
+                        constraints,
                         AssignTypeFlags.Default
                     )
                 ) {
@@ -1156,7 +1157,8 @@ export function createTypeEvaluator(
     function getTypeOfExpressionCore(
         node: ExpressionNode,
         flags = EvalFlags.None,
-        inferenceContext?: InferenceContext
+        inferenceContext: InferenceContext | undefined,
+        constraints: ConstraintTracker | undefined
     ): TypeResult {
         let typeResult: TypeResult | undefined;
         let expectingInstantiable = (flags & EvalFlags.InstantiableType) !== 0;
@@ -1183,7 +1185,7 @@ export function createTypeEvaluator(
             }
 
             case ParseNodeType.Tuple: {
-                typeResult = getTypeOfTuple(node, flags, inferenceContext);
+                typeResult = getTypeOfTuple(node, flags, inferenceContext, constraints);
                 break;
             }
 
@@ -1199,7 +1201,7 @@ export function createTypeEvaluator(
                     expectingInstantiable = false;
                 }
 
-                typeResult = getTypeOfStringList(node, flags);
+                typeResult = getTypeOfStringList(node, flags, constraints);
                 break;
             }
 
@@ -1248,7 +1250,7 @@ export function createTypeEvaluator(
             }
 
             case ParseNodeType.Await: {
-                typeResult = getTypeOfAwaitOperator(node, flags, inferenceContext);
+                typeResult = getTypeOfAwaitOperator(node, flags, constraints, inferenceContext);
                 break;
             }
 
@@ -1273,7 +1275,7 @@ export function createTypeEvaluator(
             }
 
             case ParseNodeType.Assignment: {
-                typeResult = getTypeOfExpression(node.d.rightExpr, flags, inferenceContext);
+                typeResult = getTypeOfExpression(node.d.rightExpr, flags, constraints, inferenceContext);
                 assignTypeToExpression(
                     node.d.leftExpr,
                     typeResult,
@@ -1289,7 +1291,7 @@ export function createTypeEvaluator(
                     addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.walrusNotAllowed(), node);
                 }
 
-                typeResult = getTypeOfExpression(node.d.rightExpr, flags, inferenceContext);
+                typeResult = getTypeOfExpression(node.d.rightExpr, flags, constraints, inferenceContext);
                 assignTypeToExpression(node.d.name, typeResult, node.d.rightExpr, /* ignoreEmptyContainers */ true);
                 break;
             }
@@ -1305,7 +1307,7 @@ export function createTypeEvaluator(
             }
 
             case ParseNodeType.Unpack: {
-                typeResult = getTypeOfUnpackOperator(node, flags, inferenceContext);
+                typeResult = getTypeOfUnpackOperator(node, flags, constraints, inferenceContext);
                 break;
             }
 
@@ -1317,7 +1319,9 @@ export function createTypeEvaluator(
                         EvalFlags.StrLiteralAsType |
                         EvalFlags.NoParamSpec |
                         EvalFlags.NoTypeVarTuple |
-                        EvalFlags.VarTypeAnnotation
+                        EvalFlags.VarTypeAnnotation,
+                    constraints,
+                    /* inferenceContext */ undefined
                 );
                 break;
             }
@@ -1333,7 +1337,7 @@ export function createTypeEvaluator(
                 // type information is cached for the completion handler.
                 suppressDiagnostics(node, () => {
                     if (node.d.child) {
-                        getTypeOfExpression(node.d.child);
+                        getTypeOfExpression(node.d.child, /* flags */ undefined, constraints);
                     }
                 });
                 typeResult = { type: UnknownType.create() };
@@ -1438,7 +1442,12 @@ export function createTypeEvaluator(
         typeResult.typeErrors = true;
     }
 
-    function getTypeOfAwaitOperator(node: AwaitNode, flags: EvalFlags, inferenceContext?: InferenceContext) {
+    function getTypeOfAwaitOperator(
+        node: AwaitNode,
+        flags: EvalFlags,
+        constraints: ConstraintTracker | undefined,
+        inferenceContext?: InferenceContext
+    ) {
         if ((flags & EvalFlags.TypeExpression) !== 0) {
             addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.awaitNotAllowed(), node);
             return { type: UnknownType.create() };
@@ -1453,7 +1462,7 @@ export function createTypeEvaluator(
               )
             : undefined;
 
-        const exprTypeResult = getTypeOfExpression(node.d.expr, flags, makeInferenceContext(expectedType));
+        const exprTypeResult = getTypeOfExpression(node.d.expr, flags, constraints, makeInferenceContext(expectedType));
         const typeResult: TypeResult = {
             type: getTypeOfAwaitable(exprTypeResult.type, node.d.expr),
             isIncomplete: exprTypeResult.isIncomplete,
@@ -1488,7 +1497,12 @@ export function createTypeEvaluator(
         return typeResult;
     }
 
-    function getTypeOfUnpackOperator(node: UnpackNode, flags: EvalFlags, inferenceContext?: InferenceContext) {
+    function getTypeOfUnpackOperator(
+        node: UnpackNode,
+        flags: EvalFlags,
+        constraints: ConstraintTracker | undefined,
+        inferenceContext?: InferenceContext
+    ) {
         let typeResult: TypeResult | undefined;
         let iterExpectedType: Type | undefined;
 
@@ -1501,7 +1515,12 @@ export function createTypeEvaluator(
             }
         }
 
-        const iterTypeResult = getTypeOfExpression(node.d.expr, flags, makeInferenceContext(iterExpectedType));
+        const iterTypeResult = getTypeOfExpression(
+            node.d.expr,
+            flags,
+            constraints,
+            makeInferenceContext(iterExpectedType)
+        );
         const iterType = iterTypeResult.type;
         if ((flags & EvalFlags.NoTypeVarTuple) === 0 && isTypeVarTuple(iterType) && !iterType.priv.isUnpacked) {
             typeResult = { type: TypeVarType.cloneForUnpacked(iterType) };
@@ -1535,7 +1554,7 @@ export function createTypeEvaluator(
         return typeResult;
     }
 
-    function getTypeOfStringList(node: StringListNode, flags: EvalFlags) {
+    function getTypeOfStringList(node: StringListNode, flags: EvalFlags, constraints: ConstraintTracker | undefined) {
         let typeResult: TypeResult | undefined;
 
         if ((flags & EvalFlags.StrLiteralAsType) !== 0) {
@@ -1548,7 +1567,7 @@ export function createTypeEvaluator(
             }
 
             if (node.d.annotation) {
-                typeResult = getTypeOfExpression(node.d.annotation, updatedFlags);
+                typeResult = getTypeOfExpression(node.d.annotation, updatedFlags, constraints);
             } else if (node.d.strings.length === 1) {
                 const tokenFlags = node.d.strings[0].d.token.flags;
 
@@ -1567,7 +1586,7 @@ export function createTypeEvaluator(
                     // to re-invoke the parser at this stage.
                     const expr = parseStringAsTypeAnnotation(node);
                     if (expr) {
-                        typeResult = getTypeOfExpression(expr, updatedFlags);
+                        typeResult = getTypeOfExpression(expr, updatedFlags, constraints);
                     }
                 }
             }
@@ -1649,7 +1668,7 @@ export function createTypeEvaluator(
             // If all of the format expressions are of type LiteralString, then
             // the resulting formatted string is also LiteralString.
             node.d.fieldExprs.forEach((expr) => {
-                const exprTypeResult = getTypeOfExpression(expr);
+                const exprTypeResult = getTypeOfExpression(expr, /* flags */ undefined, /* constraints */ undefined);
                 const exprType = exprTypeResult.type;
 
                 if (exprTypeResult.isIncomplete) {
@@ -2595,7 +2614,11 @@ export function createTypeEvaluator(
 
             case ParseNodeType.MemberAccess: {
                 const baseType = makeTopLevelTypeVarsConcrete(
-                    getTypeOfExpression(expression.d.leftExpr, EvalFlags.MemberAccessBaseDefaults).type
+                    getTypeOfExpression(
+                        expression.d.leftExpr,
+                        EvalFlags.MemberAccessBaseDefaults,
+                        /* constraints */ undefined
+                    ).type
                 );
                 let classMemberInfo: ClassMember | undefined;
 
@@ -2633,7 +2656,8 @@ export function createTypeEvaluator(
 
             case ParseNodeType.Index: {
                 const baseType = makeTopLevelTypeVarsConcrete(
-                    getTypeOfExpression(expression.d.leftExpr, EvalFlags.IndexBaseDefaults).type
+                    getTypeOfExpression(expression.d.leftExpr, EvalFlags.IndexBaseDefaults, /* constraints */ undefined)
+                        .type
                 );
 
                 if (baseType && isClassInstance(baseType)) {
@@ -3427,7 +3451,11 @@ export function createTypeEvaluator(
         srcExpr?: ExpressionNode,
         expectedTypeDiagAddendum?: DiagnosticAddendum
     ) {
-        const baseTypeResult = getTypeOfExpression(target.d.leftExpr, EvalFlags.MemberAccessBaseDefaults);
+        const baseTypeResult = getTypeOfExpression(
+            target.d.leftExpr,
+            EvalFlags.MemberAccessBaseDefaults,
+            /* constraints */ undefined
+        );
         const baseType = makeTopLevelTypeVarsConcrete(baseTypeResult.type);
         let enclosingClass: ClassType | undefined;
 
@@ -4108,7 +4136,11 @@ export function createTypeEvaluator(
         // Is the source expression a TypeVar() call?
         if (isTypeVar(typeResult.type)) {
             if (srcExpr && srcExpr.nodeType === ParseNodeType.Call) {
-                const callType = getTypeOfExpression(srcExpr.d.leftExpr, EvalFlags.CallBaseDefaults).type;
+                const callType = getTypeOfExpression(
+                    srcExpr.d.leftExpr,
+                    EvalFlags.CallBaseDefaults,
+                    /* constraints */ undefined
+                ).type;
                 if (
                     isInstantiableClass(callType) &&
                     (ClassType.isBuiltIn(callType, 'TypeVar') ||
@@ -4160,7 +4192,11 @@ export function createTypeEvaluator(
             }
 
             case ParseNodeType.Index: {
-                const baseTypeResult = getTypeOfExpression(target.d.leftExpr, EvalFlags.IndexBaseDefaults);
+                const baseTypeResult = getTypeOfExpression(
+                    target.d.leftExpr,
+                    EvalFlags.IndexBaseDefaults,
+                    /* constraints */ undefined
+                );
 
                 getTypeOfIndexWithBaseType(
                     target,
@@ -4243,7 +4279,7 @@ export function createTypeEvaluator(
                 // type information is cached for the completion handler.
                 if (target.d.child) {
                     suppressDiagnostics(target.d.child, () => {
-                        getTypeOfExpression(target.d.child!);
+                        getTypeOfExpression(target.d.child!, /* flags */ undefined, /* constraints */ undefined);
                     });
                 }
                 break;
@@ -4260,7 +4296,11 @@ export function createTypeEvaluator(
         const baseExceptionType = getBuiltInType(node, 'BaseException');
 
         if (node.d.typeExpression) {
-            const exceptionType = getTypeOfExpression(node.d.typeExpression).type;
+            const exceptionType = getTypeOfExpression(
+                node.d.typeExpression,
+                /* flags */ undefined,
+                /* constraints */ undefined
+            ).type;
 
             // Validate that the argument of "raise" is an exception object or class.
             // If it is a class, validate that the class's constructor accepts zero
@@ -4346,12 +4386,16 @@ export function createTypeEvaluator(
             case ParseNodeType.Name: {
                 // Get the type to evaluate whether it's bound
                 // and to mark it accessed.
-                getTypeOfExpression(node);
+                getTypeOfExpression(node, /* flags */ undefined, /* constraints */ undefined);
                 break;
             }
 
             case ParseNodeType.MemberAccess: {
-                const baseTypeResult = getTypeOfExpression(node.d.leftExpr, EvalFlags.MemberAccessBaseDefaults);
+                const baseTypeResult = getTypeOfExpression(
+                    node.d.leftExpr,
+                    EvalFlags.MemberAccessBaseDefaults,
+                    /* constraints */ undefined
+                );
                 const delAccessResult = getTypeOfMemberAccessWithBaseType(
                     node,
                     baseTypeResult,
@@ -4368,7 +4412,11 @@ export function createTypeEvaluator(
             }
 
             case ParseNodeType.Index: {
-                const baseTypeResult = getTypeOfExpression(node.d.leftExpr, EvalFlags.IndexBaseDefaults);
+                const baseTypeResult = getTypeOfExpression(
+                    node.d.leftExpr,
+                    EvalFlags.IndexBaseDefaults,
+                    /* constraints */ undefined
+                );
                 getTypeOfIndexWithBaseType(node, baseTypeResult, { method: 'del' }, EvalFlags.None);
                 writeTypeCache(node, { type: UnboundType.create() }, EvalFlags.None);
                 break;
@@ -4386,7 +4434,7 @@ export function createTypeEvaluator(
                 // type information is cached for the completion handler.
                 if (node.d.child) {
                     suppressDiagnostics(node.d.child, () => {
-                        getTypeOfExpression(node.d.child!);
+                        getTypeOfExpression(node.d.child!, /* flags */ undefined, /* constraints */ undefined);
                     });
                 }
                 break;
@@ -5176,7 +5224,7 @@ export function createTypeEvaluator(
                 leftExprFlags |= EvalFlags.NoConvertSpecialForm;
             }
         }
-        const baseTypeResult = getTypeOfExpression(node.d.leftExpr, leftExprFlags);
+        const baseTypeResult = getTypeOfExpression(node.d.leftExpr, leftExprFlags, /* constraints */ undefined);
 
         if (isTypeAliasPlaceholder(baseTypeResult.type)) {
             return {
@@ -6533,7 +6581,11 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfIndex(node: IndexNode, flags = EvalFlags.None): TypeResult {
-        const baseTypeResult = getTypeOfExpression(node.d.leftExpr, flags | EvalFlags.IndexBaseDefaults);
+        const baseTypeResult = getTypeOfExpression(
+            node.d.leftExpr,
+            flags | EvalFlags.IndexBaseDefaults,
+            /* constraints */ undefined
+        );
 
         // If this is meant to be a type and the base expression is a string expression,
         // emit an error because this is an illegal annotation form and will generate a
@@ -7296,7 +7348,7 @@ export function createTypeEvaluator(
         if (!baseTypeResult.isIncomplete) {
             node.d.items.forEach((item) => {
                 if (!isTypeCached(item.d.valueExpr)) {
-                    getTypeOfExpression(item.d.valueExpr, flags & EvalFlags.ForwardRefs);
+                    getTypeOfExpression(item.d.valueExpr, flags & EvalFlags.ForwardRefs, /* constraints */ undefined);
                 }
             });
         }
@@ -7468,7 +7520,7 @@ export function createTypeEvaluator(
             isClassInstance(baseType)
         ) {
             const index0Expr = node.d.items[0].d.valueExpr;
-            const valueType = getTypeOfExpression(index0Expr).type;
+            const valueType = getTypeOfExpression(index0Expr, /* flags */ undefined, /* constraints */ undefined).type;
 
             if (
                 isClassInstance(valueType) &&
@@ -7515,7 +7567,11 @@ export function createTypeEvaluator(
 
         if (positionalArgs.length === 1 && unpackedListArgs.length === 0 && !node.d.trailingComma) {
             // Handle the common case where there is a single positional argument.
-            const typeResult = getTypeOfExpression(positionalArgs[0].d.valueExpr);
+            const typeResult = getTypeOfExpression(
+                positionalArgs[0].d.valueExpr,
+                /* flags */ undefined,
+                /* constraints */ undefined
+            );
             positionalIndexType = typeResult.type;
             if (typeResult.isIncomplete) {
                 isPositionalIndexTypeIncomplete = true;
@@ -7527,7 +7583,11 @@ export function createTypeEvaluator(
             // Package up all of the positionals into a tuple.
             const tupleTypeArgs: TupleTypeArg[] = [];
             positionalArgs.forEach((arg) => {
-                const typeResult = getTypeOfExpression(arg.d.valueExpr);
+                const typeResult = getTypeOfExpression(
+                    arg.d.valueExpr,
+                    /* flags */ undefined,
+                    /* constraints */ undefined
+                );
                 tupleTypeArgs.push({ type: typeResult.type, isUnbounded: false });
                 if (typeResult.isIncomplete) {
                     isPositionalIndexTypeIncomplete = true;
@@ -7535,7 +7595,11 @@ export function createTypeEvaluator(
             });
 
             unpackedListArgs.forEach((arg) => {
-                const typeResult = getTypeOfExpression(arg.d.valueExpr);
+                const typeResult = getTypeOfExpression(
+                    arg.d.valueExpr,
+                    /* flags */ undefined,
+                    /* constraints */ undefined
+                );
                 if (typeResult.isIncomplete) {
                     isPositionalIndexTypeIncomplete = true;
                 }
@@ -7664,7 +7728,7 @@ export function createTypeEvaluator(
                 adjFlags =
                     EvalFlags.NoParamSpec | EvalFlags.NoTypeVarTuple | EvalFlags.NoSpecialize | EvalFlags.NoClassVar;
                 typeResult = {
-                    ...getTypeOfExpression(expr, adjFlags),
+                    ...getTypeOfExpression(expr, adjFlags, /* constraints */ undefined),
                     node: expr,
                 };
             } else if (options?.isAnnotatedClass && argIndex > 0) {
@@ -7677,7 +7741,7 @@ export function createTypeEvaluator(
                 }
 
                 typeResult = {
-                    ...getTypeOfExpression(expr, adjFlags),
+                    ...getTypeOfExpression(expr, adjFlags, /* constraints */ undefined),
                     node: expr,
                 };
             } else {
@@ -7761,7 +7825,7 @@ export function createTypeEvaluator(
             typeResult = {
                 type: UnknownType.create(),
                 typeList: node.d.items.map((entry) => {
-                    return { ...getTypeOfExpression(entry, adjustedFlags), node: entry };
+                    return { ...getTypeOfExpression(entry, adjustedFlags, /* constraints */ undefined), node: entry };
                 }),
                 node,
             };
@@ -7769,7 +7833,7 @@ export function createTypeEvaluator(
             // Set the node's type so it isn't reevaluated later.
             setTypeResultForNode(node, { type: UnknownType.create() });
         } else {
-            typeResult = { ...getTypeOfExpression(node, adjustedFlags), node };
+            typeResult = { ...getTypeOfExpression(node, adjustedFlags, /* constraints */ undefined), node };
 
             if (node.nodeType === ParseNodeType.Dictionary) {
                 addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.dictInAnnotation(), node);
@@ -7789,7 +7853,8 @@ export function createTypeEvaluator(
     function getTypeOfTuple(
         node: TupleNode,
         flags: EvalFlags,
-        inferenceContext: InferenceContext | undefined
+        inferenceContext: InferenceContext | undefined,
+        constraints: ConstraintTracker | undefined
     ): TypeResult {
         if ((flags & EvalFlags.TypeExpression) !== 0 && node.parent?.nodeType !== ParseNodeType.Argument) {
             // This is allowed inside of an index trailer, specifically
@@ -7829,7 +7894,7 @@ export function createTypeEvaluator(
 
                     if (!matchingSubtype) {
                         const subtypeResult = useSpeculativeMode(node, () => {
-                            return getTypeOfTupleWithContext(node, flags, makeInferenceContext(subtype));
+                            return getTypeOfTupleWithContext(node, flags, makeInferenceContext(subtype), constraints);
                         });
 
                         if (subtypeResult && assignType(subtype, subtypeResult.type)) {
@@ -7845,7 +7910,7 @@ export function createTypeEvaluator(
 
         let expectedTypeDiagAddendum: DiagnosticAddendum | undefined;
         if (expectedType) {
-            const result = getTypeOfTupleWithContext(node, flags, makeInferenceContext(expectedType));
+            const result = getTypeOfTupleWithContext(node, flags, makeInferenceContext(expectedType), constraints);
 
             if (result && !result.typeErrors) {
                 return result;
@@ -7868,7 +7933,8 @@ export function createTypeEvaluator(
     function getTypeOfTupleWithContext(
         node: TupleNode,
         flags: EvalFlags,
-        inferenceContext: InferenceContext
+        inferenceContext: InferenceContext,
+        constraints: ConstraintTracker | undefined
     ): TypeResult | undefined {
         inferenceContext.expectedType = transformPossibleRecursiveTypeAlias(inferenceContext.expectedType);
         if (!isClassInstance(inferenceContext.expectedType)) {
@@ -7897,7 +7963,7 @@ export function createTypeEvaluator(
                 }
             }
         } else {
-            const tupleConstraints = new ConstraintTracker();
+            const tupleConstraints = constraints ?? new ConstraintTracker();
             if (
                 !addConstraintsForExpectedType(
                     evaluatorInterface,
@@ -7926,6 +7992,7 @@ export function createTypeEvaluator(
             getTypeOfExpression(
                 expr,
                 flags | EvalFlags.StripTupleLiterals,
+                constraints,
                 makeInferenceContext(
                     index < expectedTypes.length ? expectedTypes[index] : undefined,
                     inferenceContext.isTypeIncomplete
@@ -7951,7 +8018,7 @@ export function createTypeEvaluator(
 
     function getTypeOfTupleInferred(node: TupleNode, flags: EvalFlags): TypeResult {
         const entryTypeResults = node.d.items.map((expr) =>
-            getTypeOfExpression(expr, flags | EvalFlags.StripTupleLiterals)
+            getTypeOfExpression(expr, flags | EvalFlags.StripTupleLiterals, /* constraints */ undefined)
         );
         const isIncomplete = entryTypeResults.some((result) => result.isIncomplete);
 
@@ -8045,7 +8112,8 @@ export function createTypeEvaluator(
         } else {
             baseTypeResult = getTypeOfExpression(
                 node.d.leftExpr,
-                EvalFlags.CallBaseDefaults | (flags & EvalFlags.ForwardRefs)
+                EvalFlags.CallBaseDefaults | (flags & EvalFlags.ForwardRefs),
+                /* constraints */ undefined
             );
         }
 
@@ -8142,7 +8210,7 @@ export function createTypeEvaluator(
                         arg.valueExpression.nodeType !== ParseNodeType.StringList &&
                         !isTypeCached(arg.valueExpression)
                     ) {
-                        getTypeOfExpression(arg.valueExpression);
+                        getTypeOfExpression(arg.valueExpression, /* flags */ undefined, /* constraints */ undefined);
                     }
                 });
             }
@@ -8171,7 +8239,11 @@ export function createTypeEvaluator(
 
         let isArgTypeIncomplete = false;
         node.d.args.forEach((arg, index) => {
-            const argTypeResult = getTypeOfExpression(arg.d.valueExpr);
+            const argTypeResult = getTypeOfExpression(
+                arg.d.valueExpr,
+                /* flags */ undefined,
+                /* constraints */ undefined
+            );
             if (argTypeResult.isIncomplete) {
                 isArgTypeIncomplete = true;
             }
@@ -8198,7 +8270,12 @@ export function createTypeEvaluator(
         }
 
         function getLambdaType() {
-            return getTypeOfExpression(node.d.leftExpr, EvalFlags.CallBaseDefaults, makeInferenceContext(expectedType));
+            return getTypeOfExpression(
+                node.d.leftExpr,
+                EvalFlags.CallBaseDefaults,
+                /* constraints */ undefined,
+                makeInferenceContext(expectedType)
+            );
         }
 
         // If one or more of the arguments are incomplete, use speculative mode
@@ -8211,7 +8288,7 @@ export function createTypeEvaluator(
 
         // If bidirectional type inference failed, use normal type inference instead.
         if (typeResult.typeErrors) {
-            typeResult = getTypeOfExpression(node.d.leftExpr, EvalFlags.CallBaseDefaults);
+            typeResult = getTypeOfExpression(node.d.leftExpr, EvalFlags.CallBaseDefaults, /* constraints */ undefined);
         }
 
         return typeResult;
@@ -8229,7 +8306,12 @@ export function createTypeEvaluator(
             return { type: UnknownType.create() };
         }
 
-        const arg0TypeResult = getTypeOfExpression(node.d.args[0].d.valueExpr, /* flags */ undefined, inferenceContext);
+        const arg0TypeResult = getTypeOfExpression(
+            node.d.args[0].d.valueExpr,
+            /* flags */ undefined,
+            /* constraints */ undefined,
+            inferenceContext
+        );
         if (arg0TypeResult.isIncomplete) {
             return { type: UnknownType.create(/* isIncomplete */ true), isIncomplete: true };
         }
@@ -8278,7 +8360,11 @@ export function createTypeEvaluator(
                 arg0Value = undefined;
             } else if (arg.d.name.d.value === 'expected_text') {
                 expectedTextNode = arg.d.valueExpr;
-                const expectedTextType = getTypeOfExpression(arg.d.valueExpr).type;
+                const expectedTextType = getTypeOfExpression(
+                    arg.d.valueExpr,
+                    /* flags */ undefined,
+                    /* constraints */ undefined
+                ).type;
 
                 if (
                     !isClassInstance(expectedTextType) ||
@@ -8308,7 +8394,12 @@ export function createTypeEvaluator(
             return { type: UnknownType.create() };
         }
 
-        const typeResult = getTypeOfExpression(arg0Value, /* flags */ undefined, inferenceContext);
+        const typeResult = getTypeOfExpression(
+            arg0Value,
+            /* flags */ undefined,
+            /* constraints */ undefined,
+            inferenceContext
+        );
         const type = typeResult.type;
 
         const exprString = ParseTreeUtils.printExpression(arg0Value);
@@ -8402,7 +8493,11 @@ export function createTypeEvaluator(
         // there is no first argument, then the class is implicit.
         let targetClassType: Type;
         if (node.d.args.length > 0) {
-            targetClassType = getTypeOfExpression(node.d.args[0].d.valueExpr).type;
+            targetClassType = getTypeOfExpression(
+                node.d.args[0].d.valueExpr,
+                /* flags */ undefined,
+                /* constraints */ undefined
+            ).type;
             const concreteTargetClassType = makeTopLevelTypeVarsConcrete(targetClassType);
 
             if (
@@ -8452,7 +8547,12 @@ export function createTypeEvaluator(
         // Determine whether to further narrow the type.
         let bindToType: ClassType | undefined;
         if (node.d.args.length > 1) {
-            const secondArgType = makeTopLevelTypeVarsConcrete(getTypeOfExpression(node.d.args[1].d.valueExpr).type);
+            const secondArgType = makeTopLevelTypeVarsConcrete(
+                getTypeOfExpression(node.d.args[1].d.valueExpr, /* flags */ undefined, /* constraints */ undefined)
+                    .type,
+                /* flags */ undefined,
+                /* constraints */ undefined
+            );
 
             let reportError = false;
 
@@ -9212,7 +9312,8 @@ export function createTypeEvaluator(
                         if (arg.valueExpression) {
                             const valueExpressionNode = arg.valueExpression;
                             return useSpeculativeMode(valueExpressionNode, () => {
-                                return getTypeOfExpression(valueExpressionNode).type;
+                                return getTypeOfExpression(valueExpressionNode, /* flags */ undefined, constraints)
+                                    .type;
                             });
                         }
 
@@ -11773,7 +11874,7 @@ export function createTypeEvaluator(
             // not reported as unaccessed.
             argList.forEach((arg) => {
                 if (arg.valueExpression && !isSpeculativeModeInUse(arg.valueExpression)) {
-                    getTypeOfExpression(arg.valueExpression);
+                    getTypeOfExpression(arg.valueExpression, /* flags */ undefined, constraints);
                 }
             });
 
@@ -11869,7 +11970,7 @@ export function createTypeEvaluator(
             // not reported as unaccessed.
             argList.forEach((arg) => {
                 if (arg.valueExpression && !isSpeculativeModeInUse(arg.valueExpression)) {
-                    getTypeOfExpression(arg.valueExpression);
+                    getTypeOfExpression(arg.valueExpression, /* flags */ undefined, constraints);
                 }
             });
 
@@ -11991,6 +12092,7 @@ export function createTypeEvaluator(
                 const exprTypeResult = getTypeOfExpression(
                     argParam.argument.valueExpression,
                     flags,
+                    constraints,
                     makeInferenceContext(expectedType, !!typeResult?.isIncomplete)
                 );
 
@@ -12772,7 +12874,8 @@ export function createTypeEvaluator(
             typeParamsExpr.d.items.map((expr) => {
                 let entryType = getTypeOfExpression(
                     expr,
-                    EvalFlags.InstantiableType | EvalFlags.AllowTypeVarWithoutScopeId
+                    EvalFlags.InstantiableType | EvalFlags.AllowTypeVarWithoutScopeId,
+                    /* constraints */ undefined
                 ).type;
 
                 if (isTypeVar(entryType)) {
@@ -13513,6 +13616,7 @@ export function createTypeEvaluator(
                 const keyTypeResult = getTypeOfExpression(
                     entryNode.d.keyExpr,
                     keyFlags | EvalFlags.StripTupleLiterals,
+                    /* constraints */ undefined,
                     makeInferenceContext(
                         expectedKeyType ?? (forceStrictInference ? NeverType.createNever() : undefined)
                     )
@@ -13558,6 +13662,7 @@ export function createTypeEvaluator(
                     valueTypeResult = getTypeOfExpression(
                         entryNode.d.valueExpr,
                         flags | EvalFlags.StripTupleLiterals,
+                        /* constraints */ undefined,
                         entryInferenceContext
                     );
                 } else {
@@ -13571,6 +13676,7 @@ export function createTypeEvaluator(
                     valueTypeResult = getTypeOfExpression(
                         entryNode.d.valueExpr,
                         flags | EvalFlags.StripTupleLiterals,
+                        /* constraints */ undefined,
                         entryInferenceContext
                     );
                 }
@@ -13630,6 +13736,7 @@ export function createTypeEvaluator(
                 let unexpandedTypeResult = getTypeOfExpression(
                     entryNode.d.expr,
                     flags | EvalFlags.StripTupleLiterals,
+                    /* constraints */ undefined,
                     entryInferenceContext
                 );
 
@@ -13868,6 +13975,7 @@ export function createTypeEvaluator(
                 entryTypeResult = getTypeOfExpression(
                     entry,
                     flags | EvalFlags.StripTupleLiterals,
+                    /* constraints */ undefined,
                     makeInferenceContext(expectedEntryType)
                 );
             }
@@ -13980,7 +14088,11 @@ export function createTypeEvaluator(
             if (entry.nodeType === ParseNodeType.Comprehension && !entry.d.isGenerator) {
                 entryTypeResult = getElementTypeFromComprehension(entry, flags | EvalFlags.StripTupleLiterals);
             } else {
-                entryTypeResult = getTypeOfExpression(entry, flags | EvalFlags.StripTupleLiterals);
+                entryTypeResult = getTypeOfExpression(
+                    entry,
+                    flags | EvalFlags.StripTupleLiterals,
+                    /* constraints */ undefined
+                );
             }
 
             if (entryTypeResult.isIncomplete) {
@@ -14145,6 +14257,7 @@ export function createTypeEvaluator(
             const exprResult = getTypeOfExpression(
                 node.d.expr,
                 /* flags */ undefined,
+                /* constraints */ undefined,
                 makeInferenceContext(expectedYieldType)
             );
             if (exprResult.isIncomplete) {
@@ -14156,7 +14269,11 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfYieldFrom(node: YieldFromNode): TypeResult {
-        const yieldFromTypeResult = getTypeOfExpression(node.d.expr);
+        const yieldFromTypeResult = getTypeOfExpression(
+            node.d.expr,
+            /* flags */ undefined,
+            /* constraints */ undefined
+        );
         const yieldFromType = yieldFromTypeResult.type;
 
         const returnedType = mapSubtypes(yieldFromType, (yieldFromSubtype) => {
@@ -14289,7 +14406,12 @@ export function createTypeEvaluator(
                         // parameter in the expected type, assume that the default value is
                         // being used to explicitly capture a value from an outer scope. Infer
                         // its type from the default value expression.
-                        paramType = getTypeOfExpression(param.d.defaultValue, undefined, inferenceContext).type;
+                        paramType = getTypeOfExpression(
+                            param.d.defaultValue,
+                            /* flags */ undefined,
+                            /* constraints */ undefined,
+                            inferenceContext
+                        ).type;
                     }
                 } else if (param.d.defaultValue) {
                     // If there is no inference context but we have a default value,
@@ -14309,7 +14431,11 @@ export function createTypeEvaluator(
 
                 if (param.d.defaultValue) {
                     // Evaluate the default value if it's present.
-                    getTypeOfExpression(param.d.defaultValue, EvalFlags.ConvertEllipsisToAny);
+                    getTypeOfExpression(
+                        param.d.defaultValue,
+                        EvalFlags.ConvertEllipsisToAny,
+                        /* constraints */ undefined
+                    );
                 }
 
                 // Determine whether we need to insert an implied position-only parameter.
@@ -14372,6 +14498,7 @@ export function createTypeEvaluator(
                     const returnTypeResult = getTypeOfExpression(
                         node.d.expr,
                         /* flags */ undefined,
+                        /* constraints */ undefined,
                         makeInferenceContext(expectedReturnType)
                     );
 
@@ -14523,7 +14650,11 @@ export function createTypeEvaluator(
         let isIncomplete = false;
 
         if (node.nodeType === ParseNodeType.ComprehensionFor) {
-            const iterableTypeResult = getTypeOfExpression(node.d.iterableExpr);
+            const iterableTypeResult = getTypeOfExpression(
+                node.d.iterableExpr,
+                /* flags */ undefined,
+                /* constraints */ undefined
+            );
             if (iterableTypeResult.isIncomplete) {
                 isIncomplete = true;
             }
@@ -14544,7 +14675,7 @@ export function createTypeEvaluator(
             // comprehension, but it is important for evaluating intermediate
             // expressions such as assignment expressions that can affect other
             // subexpressions.
-            getTypeOfExpression(node.d.testExpr);
+            getTypeOfExpression(node.d.testExpr, /* flags */ undefined, /* constraints */ undefined);
         }
 
         return isIncomplete;
@@ -14573,6 +14704,7 @@ export function createTypeEvaluator(
             const keyTypeResult = getTypeOfExpression(
                 node.d.expr.d.keyExpr,
                 flags,
+                /* constraints */ undefined,
                 makeInferenceContext(expectedKeyType)
             );
             if (keyTypeResult.isIncomplete) {
@@ -14589,6 +14721,7 @@ export function createTypeEvaluator(
             const valueTypeResult = getTypeOfExpression(
                 node.d.expr.d.valueExpr,
                 flags,
+                /* constraints */ undefined,
                 makeInferenceContext(expectedValueOrElementType)
             );
             if (valueTypeResult.isIncomplete) {
@@ -14608,11 +14741,17 @@ export function createTypeEvaluator(
             ]);
         } else if (node.d.expr.nodeType === ParseNodeType.DictionaryExpandEntry) {
             // The parser should have reported an error in this case because it's not allowed.
-            getTypeOfExpression(node.d.expr.d.expr, flags, makeInferenceContext(expectedValueOrElementType));
+            getTypeOfExpression(
+                node.d.expr.d.expr,
+                flags,
+                /* constraints */ undefined,
+                makeInferenceContext(expectedValueOrElementType)
+            );
         } else if (isExpressionNode(node)) {
             const exprTypeResult = getTypeOfExpression(
                 node.d.expr as ExpressionNode,
                 flags,
+                /* constraints */ undefined,
                 makeInferenceContext(expectedValueOrElementType)
             );
             if (exprTypeResult.isIncomplete) {
@@ -14632,15 +14771,15 @@ export function createTypeEvaluator(
         // references. We can skip this if we're executing speculatively.
         if (!isSpeculativeModeInUse(node)) {
             if (node.d.startValue) {
-                getTypeOfExpression(node.d.startValue);
+                getTypeOfExpression(node.d.startValue, /* flags */ undefined, /* constraints */ undefined);
             }
 
             if (node.d.endValue) {
-                getTypeOfExpression(node.d.endValue);
+                getTypeOfExpression(node.d.endValue, /* flags */ undefined, /* constraints */ undefined);
             }
 
             if (node.d.stepValue) {
-                getTypeOfExpression(node.d.stepValue);
+                getTypeOfExpression(node.d.stepValue, /* flags */ undefined, /* constraints */ undefined);
             }
         }
 
@@ -14985,7 +15124,8 @@ export function createTypeEvaluator(
             if (!type) {
                 const exprType = getTypeOfExpression(
                     itemExpr,
-                    (flags & (EvalFlags.ForwardRefs | EvalFlags.TypeExpression)) | EvalFlags.NoConvertSpecialForm
+                    (flags & (EvalFlags.ForwardRefs | EvalFlags.TypeExpression)) | EvalFlags.NoConvertSpecialForm,
+                    /* constraints */ undefined
                 );
 
                 // Is this an enum type?
@@ -16116,7 +16256,7 @@ export function createTypeEvaluator(
         const aliasMapEntry = specialTypes.get(assignedName);
         if (aliasMapEntry) {
             // Evaluate the expression so symbols are marked as accessed.
-            getTypeOfExpression(node.d.rightExpr);
+            getTypeOfExpression(node.d.rightExpr, /* flags */ undefined, /* constraints */ undefined);
             return createSpecialBuiltInClass(node, assignedName, aliasMapEntry);
         }
 
@@ -16225,7 +16365,12 @@ export function createTypeEvaluator(
                 }
             }
 
-            const srcTypeResult = getTypeOfExpression(node.d.rightExpr, flags, makeInferenceContext(declaredType));
+            const srcTypeResult = getTypeOfExpression(
+                node.d.rightExpr,
+                flags,
+                /* constraints */ undefined,
+                makeInferenceContext(declaredType)
+            );
 
             rightHandType = srcTypeResult.type;
             expectedTypeDiagAddendum = srcTypeResult.expectedTypeDiagAddendum;
@@ -16581,7 +16726,7 @@ export function createTypeEvaluator(
                 if (arg.d.argCategory === ArgCategory.UnpackedDictionary) {
                     // Evaluate the expression's type so symbols are marked accessed
                     // and errors are reported.
-                    getTypeOfExpression(arg.d.valueExpr);
+                    getTypeOfExpression(arg.d.valueExpr, /* flags */ undefined, /* constraints */ undefined);
                     return;
                 }
 
@@ -16589,10 +16734,10 @@ export function createTypeEvaluator(
                     let argType: Type;
 
                     if (arg.d.argCategory === ArgCategory.UnpackedList) {
-                        getTypeOfExpression(arg.d.valueExpr);
+                        getTypeOfExpression(arg.d.valueExpr, /* flags */ undefined, /* constraints */ undefined);
                         argType = UnknownType.create();
                     } else {
-                        argType = getTypeOfExpression(arg.d.valueExpr, exprFlags).type;
+                        argType = getTypeOfExpression(arg.d.valueExpr, exprFlags, /* constraints */ undefined).type;
 
                         if (
                             isTypeVar(argType) &&
@@ -17066,7 +17211,7 @@ export function createTypeEvaluator(
 
             // Determine the effective metaclass.
             if (metaclassNode) {
-                const metaclassType = getTypeOfExpression(metaclassNode, exprFlags).type;
+                const metaclassType = getTypeOfExpression(metaclassNode, exprFlags, /* constraints */ undefined).type;
                 if (isInstantiableClass(metaclassType) || isUnknown(metaclassType)) {
                     if (requiresSpecialization(metaclassType, { ignorePseudoGeneric: true })) {
                         addDiagnostic(
@@ -17750,7 +17895,7 @@ export function createTypeEvaluator(
         // Evaluate all of the expressions so they are checked and marked referenced.
         argList.forEach((arg) => {
             if (arg.valueExpression) {
-                getTypeOfExpression(arg.valueExpression);
+                getTypeOfExpression(arg.valueExpression, /* flags */ undefined, /* constraints */ undefined);
             }
         });
     }
@@ -18067,6 +18212,7 @@ export function createTypeEvaluator(
                     defaultValueType = getTypeOfExpression(
                         param.d.defaultValue,
                         treatEllipsisAsAny ? EvalFlags.ConvertEllipsisToAny : EvalFlags.None,
+                        /* constraints */ undefined,
                         makeInferenceContext(annotatedType)
                     ).type;
                 }
@@ -18424,7 +18570,11 @@ export function createTypeEvaluator(
     }
 
     function inferParamTypeFromDefaultValue(paramValueExpr: ExpressionNode) {
-        const defaultValueType = getTypeOfExpression(paramValueExpr, EvalFlags.ConvertEllipsisToAny).type;
+        const defaultValueType = getTypeOfExpression(
+            paramValueExpr,
+            EvalFlags.ConvertEllipsisToAny,
+            /* constraints */ undefined
+        ).type;
 
         let inferredParamType: Type | undefined;
 
@@ -18652,7 +18802,11 @@ export function createTypeEvaluator(
                             functionDecl.returnStatements.forEach((returnNode) => {
                                 if (isNodeReachable(returnNode)) {
                                     if (returnNode.d.expr) {
-                                        const returnTypeResult = getTypeOfExpression(returnNode.d.expr);
+                                        const returnTypeResult = getTypeOfExpression(
+                                            returnNode.d.expr,
+                                            /* flags */ undefined,
+                                            /* constraints */ undefined
+                                        );
                                         if (returnTypeResult.isIncomplete) {
                                             isIncomplete = true;
                                         }
@@ -18711,7 +18865,11 @@ export function createTypeEvaluator(
                                 if (isNodeReachable(yieldNode)) {
                                     if (yieldNode.nodeType === ParseNodeType.YieldFrom) {
                                         isYieldResultUsed = true;
-                                        const iteratorTypeResult = getTypeOfExpression(yieldNode.d.expr);
+                                        const iteratorTypeResult = getTypeOfExpression(
+                                            yieldNode.d.expr,
+                                            /* flags */ undefined,
+                                            /* constraints */ undefined
+                                        );
                                         if (
                                             isClassInstance(iteratorTypeResult.type) &&
                                             ClassType.isBuiltIn(iteratorTypeResult.type, 'Coroutine')
@@ -18742,7 +18900,11 @@ export function createTypeEvaluator(
                                         }
 
                                         if (yieldNode.d.expr) {
-                                            const yieldType = getTypeOfExpression(yieldNode.d.expr).type;
+                                            const yieldType = getTypeOfExpression(
+                                                yieldNode.d.expr,
+                                                /* flags */ undefined,
+                                                /* constraints */ undefined
+                                            ).type;
                                             inferredYieldTypes.push(yieldType ?? UnknownType.create());
                                         } else {
                                             inferredYieldTypes.push(getNoneType());
@@ -18818,7 +18980,11 @@ export function createTypeEvaluator(
             if (!raiseStatement.d.typeExpression || raiseStatement.d.valueExpression) {
                 return false;
             }
-            const raiseType = getTypeOfExpression(raiseStatement.d.typeExpression).type;
+            const raiseType = getTypeOfExpression(
+                raiseStatement.d.typeExpression,
+                /* flags */ undefined,
+                /* constraints */ undefined
+            ).type;
             const classType = isInstantiableClass(raiseType)
                 ? raiseType
                 : isClassInstance(raiseType)
@@ -18837,7 +19003,11 @@ export function createTypeEvaluator(
             return;
         }
 
-        const iteratorTypeResult = getTypeOfExpression(node.d.iterableExpr);
+        const iteratorTypeResult = getTypeOfExpression(
+            node.d.iterableExpr,
+            /* flags */ undefined,
+            /* constraints */ undefined
+        );
         const iteratedType =
             getTypeOfIterator(iteratorTypeResult, !!node.d.isAsync, node.d.iterableExpr)?.type ?? UnknownType.create();
 
@@ -18858,7 +19028,11 @@ export function createTypeEvaluator(
             return;
         }
 
-        const exceptionTypeResult = getTypeOfExpression(node.d.typeExpr!);
+        const exceptionTypeResult = getTypeOfExpression(
+            node.d.typeExpr!,
+            /* flags */ undefined,
+            /* constraints */ undefined
+        );
         const exceptionTypes = exceptionTypeResult.type;
 
         function getExceptionType(exceptionType: Type, errorNode: ExpressionNode) {
@@ -18923,7 +19097,7 @@ export function createTypeEvaluator(
             return;
         }
 
-        const exprTypeResult = getTypeOfExpression(node.d.expr);
+        const exprTypeResult = getTypeOfExpression(node.d.expr, /* flags */ undefined, /* constraints */ undefined);
         let exprType = exprTypeResult.type;
         const isAsync = node.parent && node.parent.nodeType === ParseNodeType.With && !!node.parent.d.isAsync;
 
@@ -19155,7 +19329,7 @@ export function createTypeEvaluator(
             return;
         }
 
-        const subjectTypeResult = getTypeOfExpression(node.d.expr);
+        const subjectTypeResult = getTypeOfExpression(node.d.expr, /* flags */ undefined, /* constraints */ undefined);
         let subjectType = subjectTypeResult.type;
 
         // Apply negative narrowing for each of the cases that doesn't have a guard statement.
@@ -19184,7 +19358,11 @@ export function createTypeEvaluator(
         }
 
         const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-        const subjectTypeResult = getTypeOfExpression(node.parent.d.expr);
+        const subjectTypeResult = getTypeOfExpression(
+            node.parent.d.expr,
+            /* flags */ undefined,
+            /* constraints */ undefined
+        );
         let subjectType = subjectTypeResult.type;
 
         // Apply negative narrowing for each of the cases prior to the current one
@@ -19427,7 +19605,7 @@ export function createTypeEvaluator(
             if (node.parent.nodeType === ParseNodeType.Global || node.parent.nodeType === ParseNodeType.Nonlocal) {
                 // For global and nonlocal statements, allow forward references so
                 // we don't use code flow during symbol lookups.
-                getTypeOfExpression(node, EvalFlags.ForwardRefs);
+                getTypeOfExpression(node, EvalFlags.ForwardRefs, /* constraints */ undefined);
                 return;
             }
 
@@ -19685,7 +19863,12 @@ export function createTypeEvaluator(
                         const liveScopeIds = ParseTreeUtils.getTypeVarScopesForNode(node);
                         declaredReturnType = makeTypeVarsBound(declaredReturnType, liveScopeIds);
                     }
-                    getTypeOfExpression(parent.d.expr, EvalFlags.None, makeInferenceContext(declaredReturnType));
+                    getTypeOfExpression(
+                        parent.d.expr,
+                        EvalFlags.None,
+                        /* constraints */ undefined,
+                        makeInferenceContext(declaredReturnType)
+                    );
                     return;
                 }
                 break;
@@ -19707,7 +19890,7 @@ export function createTypeEvaluator(
             return;
         }
 
-        getTypeOfExpression(nodeToEvaluate, flags);
+        getTypeOfExpression(nodeToEvaluate, flags, /* constraints */ undefined);
     }
 
     function evaluateTypeOfParam(node: ParameterNode): void {
@@ -20531,7 +20714,12 @@ export function createTypeEvaluator(
 
         // If there was no defined type provided, there should always
         // be a value expression from which we can retrieve the type.
-        return getTypeOfExpression(arg.valueExpression, /* flags */ undefined, inferenceContext);
+        return getTypeOfExpression(
+            arg.valueExpression,
+            /* flags */ undefined,
+            /* constraints */ undefined,
+            inferenceContext
+        );
     }
 
     // This function is like getTypeOfArg except that it is
@@ -20617,7 +20805,7 @@ export function createTypeEvaluator(
             flags |= EvalFlags.NotParsed;
         }
 
-        return getTypeOfExpression(node, flags);
+        return getTypeOfExpression(node, flags, /* constraints */ undefined);
     }
 
     function getBuiltInType(node: ParseNode, name: string): Type {
@@ -21589,7 +21777,8 @@ export function createTypeEvaluator(
                 if (resolvedDecl.inferredTypeSource?.nodeType === ParseNodeType.Call) {
                     const baseTypeResult = getTypeOfExpression(
                         resolvedDecl.inferredTypeSource.d.leftExpr,
-                        EvalFlags.CallBaseDefaults
+                        EvalFlags.CallBaseDefaults,
+                        /* constraints */ undefined
                     );
                     const callType = baseTypeResult.type;
 
@@ -21720,7 +21909,11 @@ export function createTypeEvaluator(
             return false;
         }
 
-        const assignedType = getTypeOfExpression(assignmentNode.d.rightExpr).type;
+        const assignedType = getTypeOfExpression(
+            assignmentNode.d.rightExpr,
+            /* flags */ undefined,
+            /* constraints */ undefined
+        ).type;
 
         // Assume that literal values will always result in the same inferred type.
         if (isClassInstance(assignedType) && isLiteralType(assignedType)) {
@@ -22415,12 +22608,20 @@ export function createTypeEvaluator(
                         const arg = args.find((arg) => param.d.name!.d.value === arg.paramName);
 
                         if (arg && arg.argument.valueExpression) {
-                            paramType = getTypeOfExpression(arg.argument.valueExpression).type;
+                            paramType = getTypeOfExpression(
+                                arg.argument.valueExpression,
+                                /* flags */ undefined,
+                                /* constraints */ undefined
+                            ).type;
                             if (!isUnknown(paramType)) {
                                 allArgTypesAreUnknown = false;
                             }
                         } else if (param.d.defaultValue) {
-                            paramType = getTypeOfExpression(param.d.defaultValue).type;
+                            paramType = getTypeOfExpression(
+                                param.d.defaultValue,
+                                /* flags */ undefined,
+                                /* constraints */ undefined
+                            ).type;
                             if (!isUnknown(paramType)) {
                                 allArgTypesAreUnknown = false;
                             }
@@ -26847,7 +27048,11 @@ export function createTypeEvaluator(
         ) {
             // See if this is a call to TypedDict. We want to support
             // recursive type references in a TypedDict call.
-            const callType = getTypeOfExpression(callLeftNode, EvalFlags.CallBaseDefaults).type;
+            const callType = getTypeOfExpression(
+                callLeftNode,
+                EvalFlags.CallBaseDefaults,
+                /* constraints */ undefined
+            ).type;
 
             if (isInstantiableClass(callType) && ClassType.isBuiltIn(callType, 'TypedDict')) {
                 return true;

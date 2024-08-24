@@ -459,6 +459,7 @@ export function transformTypeForEnumMember(
         assignedType = evaluator.getTypeOfExpression(
             nameNode.parent.d.rightExpr,
             /* flags */ undefined,
+            /* constraints */ undefined,
             makeInferenceContext(declaredType)
         ).type;
     }
