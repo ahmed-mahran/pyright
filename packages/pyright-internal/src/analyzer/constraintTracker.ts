@@ -267,11 +267,12 @@ export class ConstraintTracker {
     }
 
     setBounds(typeVar: TypeVarType, lowerBound: Type | undefined, upperBound?: Type, retainLiterals?: boolean) {
-        assert(!this._isLocked);
-
-        return this._constraintSets.forEach((set) => {
-            set.setBounds(typeVar, lowerBound, upperBound, retainLiterals);
-        });
+        // assert(!this._isLocked);
+        if (!this._isLocked) {
+            return this._constraintSets.forEach((set) => {
+                set.setBounds(typeVar, lowerBound, upperBound, retainLiterals);
+            });
+        }
     }
 
     getScore() {

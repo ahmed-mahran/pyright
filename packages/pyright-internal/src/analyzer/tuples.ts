@@ -18,6 +18,7 @@ import {
     ClassType,
     combineTypes,
     isAnyOrUnknown,
+    isClass,
     isClassInstance,
     isInstantiableClass,
     isTypeVar,
@@ -25,6 +26,7 @@ import {
     isUnpackedTypeVarTuple,
     TupleTypeArg,
     Type,
+    TypeVarKind,
     TypeVarType,
 } from './types';
 import {
@@ -281,20 +283,40 @@ export function matchTupleTypeArgs(
     const memo = new Map<string, boolean>();
     const matches = function (destType: TupleTypeArg | undefined, srcType: TupleTypeArg | undefined): boolean {
         const key = `${toStr(destType)}|${toStr(srcType)}`;
+        if (toStr(srcType) === 'object' || toStr(destType) === 'object') {
+            console.error();
+        }
         let res = memo.get(key);
         if (res !== undefined) {
             return res;
         } else if (destType !== undefined && srcType !== undefined) {
+            function isAnyUnknownOrObject(type: Type) {
+                return (isClass(type) && ClassType.isBuiltIn(type, 'object')) || isAnyOrUnknown(type);
+            }
+            function isUniversal(type: Type): boolean {
+                if (isAnyUnknownOrObject(type)) {
+                    return true;
+                }
+
+                if ((isTypeVar(type) && type.shared.kind === TypeVarKind.TypeVar) || isUnpackedTypeVarTuple(type)) {
+                    return (
+                        //TODO: either freeTypeVar or (bound and constraints) but maybe check whether type is complete
+                        (!type.priv.freeTypeVar || isUniversal(type.priv.freeTypeVar)) &&
+                        (!type.shared.boundType || isUniversal(type.shared.boundType)) &&
+                        type.shared.constraints.find((c) => !isUniversal(c)) === undefined
+                    );
+                }
+
+                return false;
+            }
             // Unbound and unconstrained unpacked dest TypeVarTuple
-            // can accept any singular src
-            const isDestVariadicAndSrcSingular =
-                isTypeVarTuple(destType.type) &&
-                !!destType.type.priv.isUnpacked &&
-                !TypeVarType.hasBound(destType.type) &&
-                !TypeVarType.hasConstraints(destType.type) &&
-                !isIndeterminate(srcType);
+            // can accept:
+            // - any singular src
+            // - Unbound and unconstrained unpacked src TypeVarTuple
+            const isDestUniversalAndSrcUndetermined =
+                isUniversal(destType.type) && (!isIndeterminate(srcType) || isUniversal(srcType.type));
             res =
-                isDestVariadicAndSrcSingular ||
+                isDestUniversalAndSrcUndetermined ||
                 evaluator.assignType(
                     destType.type,
                     srcType.type,
