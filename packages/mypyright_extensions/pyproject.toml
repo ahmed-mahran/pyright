@@ -1,0 +1,23 @@
+[project]
+name = "mypyright_extensions"
+description = "Special python typing extensions for MyPyright and typedtensor."
+version = "0.0.0"
+readme = "README.md"
+authors = [{name = "Ahmed Mahran", email = "ahmed.mahran@mashin.io"}]
+urls = {repository = "https://github.com/ahmed-mahran/pyright" }
+license = {file = "LICENSE"}
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["mypyright_extensions.py"]
+
+[tool.ruff]
+line-length = 120
+src = ["./"]
+fix = true
+show-fixes = true
