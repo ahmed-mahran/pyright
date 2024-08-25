@@ -131,8 +131,11 @@ export class PyrightServer extends LanguageServerBase {
                 if (stubPath && isString(stubPath)) {
                     serverSettings.stubPath = resolvePathWithEnvVariables(workspace, stubPath, workspaces);
                 }
+            }
 
-                const diagnosticSeverityOverrides = pythonAnalysisSection.diagnosticSeverityOverrides;
+            const mypyrightAnalysisSection = await this.getConfiguration(workspace.rootUri, 'mypyright.analysis');
+            if (mypyrightAnalysisSection) {
+                const diagnosticSeverityOverrides = mypyrightAnalysisSection.diagnosticSeverityOverrides;
                 if (diagnosticSeverityOverrides) {
                     for (const [name, value] of Object.entries(diagnosticSeverityOverrides)) {
                         const ruleName = this.getDiagnosticRuleName(name);
@@ -143,20 +146,20 @@ export class PyrightServer extends LanguageServerBase {
                     }
                 }
 
-                if (pythonAnalysisSection.diagnosticMode !== undefined) {
-                    serverSettings.openFilesOnly = this.isOpenFilesOnly(pythonAnalysisSection.diagnosticMode);
-                } else if (pythonAnalysisSection.openFilesOnly !== undefined) {
-                    serverSettings.openFilesOnly = !!pythonAnalysisSection.openFilesOnly;
+                if (mypyrightAnalysisSection.diagnosticMode !== undefined) {
+                    serverSettings.openFilesOnly = this.isOpenFilesOnly(mypyrightAnalysisSection.diagnosticMode);
+                } else if (mypyrightAnalysisSection.openFilesOnly !== undefined) {
+                    serverSettings.openFilesOnly = !!mypyrightAnalysisSection.openFilesOnly;
                 }
 
-                if (pythonAnalysisSection.useLibraryCodeForTypes !== undefined) {
-                    serverSettings.useLibraryCodeForTypes = !!pythonAnalysisSection.useLibraryCodeForTypes;
+                if (mypyrightAnalysisSection.useLibraryCodeForTypes !== undefined) {
+                    serverSettings.useLibraryCodeForTypes = !!mypyrightAnalysisSection.useLibraryCodeForTypes;
                 }
 
-                serverSettings.logLevel = convertLogLevel(pythonAnalysisSection.logLevel);
-                serverSettings.autoSearchPaths = !!pythonAnalysisSection.autoSearchPaths;
+                serverSettings.logLevel = convertLogLevel(mypyrightAnalysisSection.logLevel);
+                serverSettings.autoSearchPaths = !!mypyrightAnalysisSection.autoSearchPaths;
 
-                const extraPaths = pythonAnalysisSection.extraPaths;
+                const extraPaths = mypyrightAnalysisSection.extraPaths;
                 if (extraPaths && Array.isArray(extraPaths) && extraPaths.length > 0) {
                     serverSettings.extraPaths = extraPaths
                         .filter((p) => p && isString(p))
@@ -164,33 +167,33 @@ export class PyrightServer extends LanguageServerBase {
                         .filter(isDefined);
                 }
 
-                serverSettings.includeFileSpecs = this._getStringValues(pythonAnalysisSection.include);
-                serverSettings.excludeFileSpecs = this._getStringValues(pythonAnalysisSection.exclude);
-                serverSettings.ignoreFileSpecs = this._getStringValues(pythonAnalysisSection.ignore);
+                serverSettings.includeFileSpecs = this._getStringValues(mypyrightAnalysisSection.include);
+                serverSettings.excludeFileSpecs = this._getStringValues(mypyrightAnalysisSection.exclude);
+                serverSettings.ignoreFileSpecs = this._getStringValues(mypyrightAnalysisSection.ignore);
 
-                if (pythonAnalysisSection.typeCheckingMode !== undefined) {
-                    serverSettings.typeCheckingMode = pythonAnalysisSection.typeCheckingMode;
+                if (mypyrightAnalysisSection.typeCheckingMode !== undefined) {
+                    serverSettings.typeCheckingMode = mypyrightAnalysisSection.typeCheckingMode;
                 }
 
-                if (pythonAnalysisSection.autoImportCompletions !== undefined) {
-                    serverSettings.autoImportCompletions = pythonAnalysisSection.autoImportCompletions;
+                if (mypyrightAnalysisSection.autoImportCompletions !== undefined) {
+                    serverSettings.autoImportCompletions = mypyrightAnalysisSection.autoImportCompletions;
                 }
 
                 if (
                     serverSettings.logLevel === LogLevel.Log &&
-                    pythonAnalysisSection.logTypeEvaluationTime !== undefined
+                    mypyrightAnalysisSection.logTypeEvaluationTime !== undefined
                 ) {
-                    serverSettings.logTypeEvaluationTime = pythonAnalysisSection.logTypeEvaluationTime;
+                    serverSettings.logTypeEvaluationTime = mypyrightAnalysisSection.logTypeEvaluationTime;
                 }
 
-                if (pythonAnalysisSection.typeEvaluationTimeThreshold !== undefined) {
-                    serverSettings.typeEvaluationTimeThreshold = pythonAnalysisSection.typeEvaluationTimeThreshold;
+                if (mypyrightAnalysisSection.typeEvaluationTimeThreshold !== undefined) {
+                    serverSettings.typeEvaluationTimeThreshold = mypyrightAnalysisSection.typeEvaluationTimeThreshold;
                 }
             } else {
                 serverSettings.autoSearchPaths = true;
             }
 
-            const pyrightSection = await this.getConfiguration(workspace.rootUri, 'pyright');
+            const pyrightSection = await this.getConfiguration(workspace.rootUri, 'mypyright');
             if (pyrightSection) {
                 if (pyrightSection.openFilesOnly !== undefined) {
                     serverSettings.openFilesOnly = !!pyrightSection.openFilesOnly;
@@ -284,7 +287,7 @@ export class PyrightServer extends LanguageServerBase {
                             console.log(e);
                         });
                 } else {
-                    this.connection.sendNotification('pyright/beginProgress');
+                    this.connection.sendNotification('mypyright/beginProgress');
                 }
             },
             report: (message: string) => {
@@ -297,7 +300,7 @@ export class PyrightServer extends LanguageServerBase {
                             console.log(e);
                         });
                 } else {
-                    this.connection.sendNotification('pyright/reportProgress', message);
+                    this.connection.sendNotification('mypyright/reportProgress', message);
                 }
             },
             end: () => {
@@ -311,7 +314,7 @@ export class PyrightServer extends LanguageServerBase {
                         });
                     workDoneProgress = undefined;
                 } else {
-                    this.connection.sendNotification('pyright/endProgress');
+                    this.connection.sendNotification('mypyright/endProgress');
                 }
             },
         };
