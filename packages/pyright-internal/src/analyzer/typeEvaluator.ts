@@ -15676,22 +15676,6 @@ export function createTypeEvaluator(
             if (isTupleTypeParam && typeArgs.length === 1 && typeArgs[0].isEmptyTupleShorthand) {
                 typeArgs = [];
             } else {
-                let sawUnpacked = false;
-                const noteSawUnpacked = (typeArg: TypeResultWithNode) => {
-                    if (sawUnpacked) {
-                        if (!reportedUnpackedError) {
-                            addDiagnostic(
-                                DiagnosticRule.reportInvalidTypeForm,
-                                LocMessage.variadicTypeArgsTooMany(),
-                                typeArg.node
-                            );
-                            reportedUnpackedError = true;
-                        }
-                    }
-                    sawUnpacked = true;
-                };
-                let reportedUnpackedError = false;
-
                 // Verify that we didn't receive any inappropriate types.
                 typeArgs.forEach((typeArg, index) => {
                     assert(typeArgs !== undefined);
@@ -15728,18 +15712,8 @@ export function createTypeEvaluator(
                     } else if (isParamSpec(typeArg.type) && allowParamSpec) {
                         // Nothing to do - this is allowed.
                     } else if (paramLimit === undefined && isTypeVarTuple(typeArg.type)) {
-                        if (!typeArg.type.priv.isInUnion) {
-                            noteSawUnpacked(typeArg);
-                        }
                         validateTypeVarTupleIsUnpacked(typeArg.type, typeArg.node);
                     } else if (paramLimit === undefined && isUnpackedClass(typeArg.type)) {
-                        if (
-                            typeArg.type.priv.tupleTypeArgs?.some(
-                                (typeArg) => isTypeVarTuple(typeArg.type) || typeArg.isUnbounded
-                            )
-                        ) {
-                            noteSawUnpacked(typeArg);
-                        }
                         validateTypeArg(typeArg, { allowUnpackedTuples: true });
                     } else {
                         validateTypeArg(typeArg);
