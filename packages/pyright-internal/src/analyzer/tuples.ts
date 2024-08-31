@@ -10,7 +10,9 @@
 import { DiagnosticAddendum } from '../common/diagnostic';
 import { LocAddendum } from '../localization/localize';
 import { ExpressionNode, SliceNode } from '../parser/parseNodes';
+import { assignTypeVar } from './constraintSolver';
 import { ConstraintTracker } from './constraintTracker';
+import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
 import { matchAccumulateSequence } from './sequenceMatching';
 import { TypeEvaluator } from './typeEvaluatorTypes';
 import {
@@ -37,6 +39,7 @@ import {
     isUnboundedTupleClass,
     specializeTupleClass,
 } from './typeUtils';
+import { TypeWalker } from './typeWalker';
 
 // Assigns the source type arguments to the dest type arguments. It assumed
 // the the caller has already verified that both the dest and source are
@@ -84,7 +87,12 @@ export function assignTupleTypeArgs(
         // but zero-or-more ints is not assignable to one-or-more ints; because the base
         // case zero int (empty) is not assignable to one-or-more ints while the base case
         // one int is assignable to zero-or-more ints.
-        if (!isTupleGradualFormSrcTypeArg && doMatch(/* isBaseCase */ true) === undefined) {
+        if (
+            !isTupleGradualFormSrcTypeArg &&
+            srcTypeArgsBaseCase.length < srcTypeArgs.length &&
+            doMatch(/* isBaseCase */ true) === undefined
+        ) {
+            //TODO isSrcIndeterminate is always true
             const isSrcIndeterminate = srcTypeArgs.length > srcTypeArgsBaseCase.length;
             const isDestIndeterminate = destTypeArgs.length > destTypeArgsBaseCase.length;
 
@@ -127,22 +135,51 @@ export function assignTupleTypeArgs(
 
         if (constraints && !constraints.isLocked()) {
             const tupleClass = evaluator.getTupleClassType();
-            //TODO: check variance
             matchedTypeArgs.forEach((pair) => {
                 if (pair.destSequence.length === 1 && isTypeVarTuple(pair.destSequence[0].type)) {
-                    const srcArgType = createVariadicTuple(pair.srcSequence, tupleClass);
-                    constraints.setBounds(pair.destSequence[0].type, srcArgType);
+                    if (pair.srcSequence.length === 1 && isTypeVarTuple(pair.srcSequence[0].type)) {
+                        evaluator.assignType(
+                            pair.destSequence[0].type,
+                            pair.srcSequence[0].type,
+                            diag,
+                            constraints,
+                            flags,
+                            recursionCount + 1
+                        );
+                    } else {
+                        const srcArgType = createVariadicTuple(pair.srcSequence, tupleClass);
+                        if (srcArgType) {
+                            evaluator.assignType(
+                                pair.destSequence[0].type,
+                                srcArgType,
+                                diag,
+                                constraints,
+                                flags,
+                                recursionCount + 1
+                            );
+                        }
+                    }
                 } else if (pair.srcSequence.length === 1 && isTypeVarTuple(pair.srcSequence[0].type)) {
                     const destArgType = createVariadicTuple(pair.destSequence, tupleClass);
-                    constraints.setBounds(pair.srcSequence[0].type, destArgType);
+                    if (destArgType) {
+                        evaluator.assignType(
+                            destArgType,
+                            pair.srcSequence[0].type,
+                            diag,
+                            constraints,
+                            flags,
+                            recursionCount + 1
+                        );
+                    }
                 } else if (pair.destSequence.length === pair.srcSequence.length) {
                     for (let i = 0; i < pair.destSequence.length; i++) {
                         const destArg = pair.destSequence[i].type;
                         const srcArg = pair.srcSequence[i].type;
+
                         if (isTypeVar(destArg)) {
-                            constraints.setBounds(destArg, srcArg);
-                        } else if (isTypeVar(srcArg)) {
-                            constraints.setBounds(srcArg, destArg);
+                            assignTypeVar(evaluator, destArg, srcArg, diag, constraints, flags, recursionCount + 1);
+                        } else if (hasTypeVar(destArg) || hasTypeVar(srcArg)) {
+                            evaluator.assignType(destArg, srcArg, diag, constraints, flags, recursionCount + 1);
                         }
                     }
                 }
@@ -151,6 +188,7 @@ export function assignTupleTypeArgs(
 
         return true;
     } else if (adjustTupleTypeArgs(evaluator, destTypeArgs, srcTypeArgs, flags)) {
+        const clonedConstraints = constraints?.clone();
         for (let argIndex = 0; argIndex < srcTypeArgs.length; argIndex++) {
             const entryDiag = diag?.createAddendum();
             const destArgType = destTypeArgs[argIndex].type;
@@ -164,6 +202,9 @@ export function assignTupleTypeArgs(
                 !destArgType.priv.isInUnion &&
                 isTupleGradualForm(srcArgType)
             ) {
+                if (clonedConstraints) {
+                    constraints?.copyFromClone(clonedConstraints);
+                }
                 return true;
             }
 
@@ -172,9 +213,9 @@ export function assignTupleTypeArgs(
                     destArgType,
                     srcArgType,
                     entryDiag?.createAddendum(),
-                    constraints,
+                    clonedConstraints,
                     flags,
-                    recursionCount
+                    recursionCount + 1
                 )
             ) {
                 if (entryDiag) {
@@ -276,16 +317,15 @@ export function matchTupleTypeArgs(
 ) {
     const toStr = function (type: TupleTypeArg | undefined): string {
         return type !== undefined
-            ? `${evaluator.printType(type.type)}${isIndeterminate(type) ? '*' : ''}`
+            ? `${evaluator.printType(type.type)}${isIndeterminate(type) ? '*' : ''}${
+                  isTypeVar(type.type) ? `${MyPyrightExtensions.printTypeVarBound(evaluator, type.type)}` : ''
+              }`
             : 'undefined';
     };
 
     const memo = new Map<string, boolean>();
     const matches = function (destType: TupleTypeArg | undefined, srcType: TupleTypeArg | undefined): boolean {
         const key = `${toStr(destType)}|${toStr(srcType)}`;
-        if (toStr(srcType) === 'object' || toStr(destType) === 'object') {
-            console.error();
-        }
         let res = memo.get(key);
         if (res !== undefined) {
             return res;
@@ -328,7 +368,7 @@ export function matchTupleTypeArgs(
                         ? constraints
                         : new ConstraintTracker(),
                     flags,
-                    recursionCount
+                    recursionCount + 1
                 );
             memo.set(key, res);
             return res;
@@ -351,7 +391,8 @@ export function matchTupleTypeArgs(
         isIndeterminate,
         matches,
         toStr,
-        toStr
+        toStr,
+        recursionCount
     );
     if (!wasLocked) {
         constraints?.unlock();
@@ -586,4 +627,20 @@ function getTupleSliceParam(
     }
 
     return value;
+}
+
+export function hasTypeVar(type: Type) {
+    if (isTypeVar(type)) {
+        return true;
+    }
+
+    let result = false;
+    class OnTypeVarStopWalker extends TypeWalker {
+        override visitTypeVar(type: TypeVarType): void {
+            result = true;
+            this.cancelWalk();
+        }
+    }
+    new OnTypeVarStopWalker().walk(type);
+    return result;
 }
