@@ -36,6 +36,7 @@ async function setVersionFor(path, version) {
         obj.version = version;
     }).then(() =>
         modifyJsonInPlace(path + 'package-lock.json', (obj) => {
+            obj.version = version;
             obj.packages[''].version = version;
         })
     );
