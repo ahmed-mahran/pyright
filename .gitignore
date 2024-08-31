@@ -126,3 +126,5 @@ Thumbs.db
 
 # Potential venv
 .venv
+
+**/__pycache__
