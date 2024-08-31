@@ -36,6 +36,7 @@ import { Uri } from '../common/uri/uri';
 import { LocAddendum, LocMessage, ParameterizedString } from '../localization/localize';
 import {
     ArgCategory,
+    ArgumentNode,
     AssignmentNode,
     AugmentedAssignmentNode,
     AwaitNode,
@@ -143,6 +144,7 @@ import {
     isEnumMetaclass,
 } from './enums';
 import { applyFunctionTransform } from './functionTransform';
+import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
 import { createNamedTupleType } from './namedTuples';
 import {
     getTypeOfAugmentedAssignment,
@@ -564,7 +566,7 @@ const maxRecursiveTypeAliasRecursionCount = 10;
 const verifyTypeCacheEvaluatorFlags = false;
 
 // This debugging option prints each expression and its evaluated type.
-const printExpressionTypes = false;
+const printExpressionTypes = true;
 
 // The following number is chosen somewhat arbitrarily. We need to cut
 // off code flow analysis at some point for code flow graphs that are too
@@ -1104,6 +1106,15 @@ export function createTypeEvaluator(
         // Don't allow speculative caching for assignment expressions because
         // the target name node won't have a corresponding type cached speculatively.
         const allowSpeculativeCaching = node.nodeType !== ParseNodeType.AssignmentExpression;
+
+        typeResult.type = MyPyrightExtensions.handleTypeForGetTypeOfExpression(
+            evaluatorInterface,
+            typeResult.type,
+            node,
+            flags,
+            constraints,
+            inferenceContext
+        );
 
         writeTypeCache(node, typeResult, flags, inferenceContext, allowSpeculativeCaching);
 
@@ -6634,7 +6645,13 @@ export function createTypeEvaluator(
             }
         }
 
-        const indexTypeResult = getTypeOfIndexWithBaseType(node, baseTypeResult, { method: 'get' }, flags);
+        const indexTypeResultEvalFlags = flags | EvalFlags.NoConvertSpecialForm;
+        const indexTypeResult = getTypeOfIndexWithBaseType(
+            node,
+            baseTypeResult,
+            { method: 'get' },
+            indexTypeResultEvalFlags
+        );
 
         if (isCodeFlowSupportedForReference(node)) {
             // We limit type narrowing for index expressions to built-in types that are
@@ -6654,7 +6671,7 @@ export function createTypeEvaluator(
 
             if (baseTypeSupportsIndexNarrowing) {
                 // Before performing code flow analysis, update the cache to prevent recursion.
-                writeTypeCache(node, { ...indexTypeResult, isIncomplete: true }, flags);
+                writeTypeCache(node, { ...indexTypeResult, isIncomplete: true }, indexTypeResultEvalFlags);
 
                 // See if we can refine the type based on code flow analysis.
                 const codeFlowTypeResult = getFlowTypeOfReference(node, /* startNode */ undefined, {
@@ -6663,7 +6680,7 @@ export function createTypeEvaluator(
                         type: indexTypeResult.type,
                         isIncomplete: !!baseTypeResult.isIncomplete || !!indexTypeResult.isIncomplete,
                     },
-                    skipConditionalNarrowing: (flags & EvalFlags.TypeExpression) !== 0,
+                    skipConditionalNarrowing: (indexTypeResultEvalFlags & EvalFlags.TypeExpression) !== 0,
                 });
 
                 if (codeFlowTypeResult.type) {
@@ -7186,7 +7203,7 @@ export function createTypeEvaluator(
                         }
 
                         if (itemMethodType) {
-                            return getTypeOfIndexedObjectOrClass(node, concreteSubtype, selfType, usage).type;
+                            return getTypeOfIndexedObjectOrClass(node, concreteSubtype, selfType, usage, flags).type;
                         }
                     }
 
@@ -7316,7 +7333,7 @@ export function createTypeEvaluator(
                 }
 
                 if (isClassInstance(concreteSubtype)) {
-                    const typeResult = getTypeOfIndexedObjectOrClass(node, concreteSubtype, selfType, usage);
+                    const typeResult = getTypeOfIndexedObjectOrClass(node, concreteSubtype, selfType, usage, flags);
                     if (typeResult.isIncomplete) {
                         isIncomplete = true;
                     }
@@ -7483,7 +7500,8 @@ export function createTypeEvaluator(
         node: IndexNode,
         baseType: ClassType,
         selfType: ClassType | TypeVarType | undefined,
-        usage: EvaluatorUsage
+        usage: EvaluatorUsage,
+        flags: EvalFlags
     ): TypeResult {
         // Handle index operations for TypedDict classes specially.
         if (isClassInstance(baseType) && ClassType.isTypedDictClass(baseType)) {
@@ -7520,7 +7538,7 @@ export function createTypeEvaluator(
             isClassInstance(baseType)
         ) {
             const index0Expr = node.d.items[0].d.valueExpr;
-            const valueType = getTypeOfExpression(index0Expr, /* flags */ undefined, /* constraints */ undefined).type;
+            const valueType = getTypeOfExpression(index0Expr, flags, /* constraints */ undefined).type;
 
             if (
                 isClassInstance(valueType) &&
@@ -7556,8 +7574,11 @@ export function createTypeEvaluator(
         }
 
         // Follow PEP 637 rules for positional and keyword arguments.
-        const positionalArgs = node.d.items.filter((item) => item.d.argCategory === ArgCategory.Simple && !item.d.name);
-        const unpackedListArgs = node.d.items.filter((item) => item.d.argCategory === ArgCategory.UnpackedList);
+        const positionalArgs = node.d.items.filter(
+            (item) =>
+                item.d.argCategory === ArgCategory.UnpackedList ||
+                (item.d.argCategory === ArgCategory.Simple && !item.d.name)
+        );
 
         const keywordArgs = node.d.items.filter((item) => item.d.argCategory === ArgCategory.Simple && !!item.d.name);
         const unpackedDictArgs = node.d.items.filter((item) => item.d.argCategory === ArgCategory.UnpackedDictionary);
@@ -7565,49 +7586,31 @@ export function createTypeEvaluator(
         let positionalIndexType: Type;
         let isPositionalIndexTypeIncomplete = false;
 
-        if (positionalArgs.length === 1 && unpackedListArgs.length === 0 && !node.d.trailingComma) {
-            // Handle the common case where there is a single positional argument.
-            const typeResult = getTypeOfExpression(
-                positionalArgs[0].d.valueExpr,
-                /* flags */ undefined,
-                /* constraints */ undefined
-            );
-            positionalIndexType = typeResult.type;
+        function getPositionalArgType(arg: ArgumentNode) {
+            const typeResult = getTypeOfExpression(arg.d.valueExpr, flags, /* constraints */ undefined);
             if (typeResult.isIncomplete) {
                 isPositionalIndexTypeIncomplete = true;
             }
-        } else if (positionalArgs.length === 0 && unpackedListArgs.length === 0) {
+            if (arg.d.argCategory === ArgCategory.UnpackedList) {
+                return { type: typeResult.type, isUnbounded: true };
+            } else {
+                return { type: typeResult.type, isUnbounded: false };
+            }
+        }
+
+        if (
+            positionalArgs.length === 1 &&
+            !node.d.trailingComma &&
+            positionalArgs[0].d.argCategory === ArgCategory.Simple
+        ) {
+            // Handle the common case where there is a single positional argument.
+            positionalIndexType = getPositionalArgType(positionalArgs[0]).type;
+        } else if (positionalArgs.length === 0) {
             // Handle the case where there are no positionals provided but there are keywords.
             positionalIndexType = makeTupleObject([]);
         } else {
             // Package up all of the positionals into a tuple.
-            const tupleTypeArgs: TupleTypeArg[] = [];
-            positionalArgs.forEach((arg) => {
-                const typeResult = getTypeOfExpression(
-                    arg.d.valueExpr,
-                    /* flags */ undefined,
-                    /* constraints */ undefined
-                );
-                tupleTypeArgs.push({ type: typeResult.type, isUnbounded: false });
-                if (typeResult.isIncomplete) {
-                    isPositionalIndexTypeIncomplete = true;
-                }
-            });
-
-            unpackedListArgs.forEach((arg) => {
-                const typeResult = getTypeOfExpression(
-                    arg.d.valueExpr,
-                    /* flags */ undefined,
-                    /* constraints */ undefined
-                );
-                if (typeResult.isIncomplete) {
-                    isPositionalIndexTypeIncomplete = true;
-                }
-                const iterableType =
-                    getTypeOfIterator(typeResult, /* isAsync */ false, arg.d.valueExpr)?.type ?? UnknownType.create();
-                tupleTypeArgs.push({ type: iterableType, isUnbounded: true });
-            });
-
+            const tupleTypeArgs: TupleTypeArg[] = positionalArgs.map(getPositionalArgType);
             positionalIndexType = makeTupleObject(tupleTypeArgs);
         }
 
@@ -20704,7 +20707,10 @@ export function createTypeEvaluator(
     function getTypeOfArg(arg: Arg, inferenceContext: InferenceContext | undefined): TypeResult {
         if (arg.typeResult) {
             const type = arg.typeResult.type;
-            return { type: type?.props?.specialForm ?? type, isIncomplete: arg.typeResult.isIncomplete };
+            return {
+                type: type && isTypeVar(type) ? type : type?.props?.specialForm ?? type,
+                isIncomplete: arg.typeResult.isIncomplete,
+            };
         }
 
         if (!arg.valueExpression) {
@@ -23485,6 +23491,15 @@ export function createTypeEvaluator(
                 }
             }
 
+            if (
+                MyPyrightExtensions.isMappedType(destType) ||
+                MyPyrightExtensions.isMappedType(srcType) ||
+                isTypeVar(destType) ||
+                isTypeVar(srcType)
+            ) {
+                isSpecialFormExempt = true;
+            }
+
             if (!isSpecialFormExempt) {
                 srcType = specialForm;
             }
@@ -23619,6 +23634,26 @@ export function createTypeEvaluator(
                     assignTypeVar(evaluatorInterface, destType, srcType, diag, constraints, flags, recursionCount);
                 }
                 return true;
+            }
+
+            if (MyPyrightExtensions.isMappedType(destType) || MyPyrightExtensions.isMappedType(srcType)) {
+                const mapSpecs = MyPyrightExtensions.deconstructMutualMappedTypes(
+                    evaluatorInterface,
+                    destType,
+                    srcType
+                );
+                const destMapSpec = mapSpecs.mapSpec1;
+                const srcMapSpec = mapSpecs.mapSpec2;
+                return (
+                    assignType(
+                        destMapSpec.map,
+                        srcMapSpec.map,
+                        diag,
+                        constraints?.clone(),
+                        flags,
+                        recursionCount + 1
+                    ) && assignType(destMapSpec.arg, srcMapSpec.arg, diag, constraints, flags, recursionCount + 1)
+                );
             }
 
             // If the dest is a TypeVarTuple, and the source is a tuple

@@ -58,6 +58,12 @@ export const enum TypeFlags {
     // inferred differently by other type checkers.
     Ambiguous = 1 << 2,
 
+    // This type refers to a higher kinded type which is a map/function F
+    // of a type T, F[T]. In this case, F is flagged as Mapped.
+    // E.g. Type[int], the type instance Type is flagged Mapped or the
+    // instantiable type int is flagged Mapped.
+    Mapped = 1 << 3,
+
     // This mask indicates which flags should be considered significant
     // when comparing two types for equivalence.
     TypeCompatibilityMask = Instantiable | Instance,
@@ -2670,6 +2676,7 @@ export interface TypeVarDetailsShared {
     name: string;
     constraints: Type[];
     boundType: Type | undefined;
+    mappedBoundType: Type | undefined;
     isDefaultExplicit: boolean;
     defaultType: Type;
 
@@ -2985,6 +2992,7 @@ export namespace TypeVarType {
                 name,
                 constraints: [],
                 boundType: undefined,
+                mappedBoundType: undefined,
                 isDefaultExplicit: false,
                 defaultType: UnknownType.create(),
                 declaredVariance: Variance.Invariant,

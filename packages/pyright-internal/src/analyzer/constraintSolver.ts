@@ -13,6 +13,7 @@ import { DiagnosticAddendum } from '../common/diagnostic';
 import { LocAddendum } from '../localization/localize';
 import { ConstraintSolution, ConstraintSolutionSet } from './constraintSolution';
 import { ConstraintSet, ConstraintTracker, TypeVarConstraints } from './constraintTracker';
+import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
 import { maxSubtypesForInferredType, SolveConstraintsOptions, TypeEvaluator } from './typeEvaluatorTypes';
 import {
     ClassType,
@@ -73,7 +74,7 @@ const maxSubtypeCountForTypeVarLowerBound = 64;
 
 // This debugging switch enables logging of the constraints before and
 // after it is updated by the constraint solver.
-const logConstraintsUpdates = false;
+const logConstraintsUpdates = true;
 
 // Assigns the source type to the dest type var in the type var context. If an existing
 // type is already associated with that type var name, it attempts to either widen or
@@ -96,8 +97,12 @@ export function assignTypeVar(
         const indent = ' '.repeat(recursionCount * 2);
         console.log(`${indent}`);
         console.log(`${indent}assignTypeVar called with`);
-        console.log(`${indent}destType: ${evaluator.printType(destType)}`);
-        console.log(`${indent}srcType: ${evaluator.printType(srcType)}`);
+        console.log(`${indent}destType: ${MyPyrightExtensions.printTypeVar(evaluator, destType)}`);
+        console.log(
+            `${indent}srcType: ${
+                isTypeVar(srcType) ? MyPyrightExtensions.printTypeVar(evaluator, srcType) : evaluator.printType(srcType)
+            }`
+        );
         console.log(`${indent}flags: ${flags}`);
         if (constraints) {
             logConstraints(evaluator, constraints, indent);
@@ -133,7 +138,7 @@ export function assignTypeVar(
         // Handle ParamSpecs specially.
         isAssignable = assignParamSpec(evaluator, destType, srcType, diag, constraints, recursionCount);
     } else {
-        if (isTypeVarTuple(destType) && !destType.priv.isInUnion) {
+        if (isTypeVarTuple(destType) && !destType.priv.isInUnion && !TypeVarType.hasBound(destType)) {
             const tupleClassType = evaluator.getTupleClassType();
             if (!isUnpacked(srcType) && tupleClassType) {
                 // Package up the type into a tuple.
@@ -157,6 +162,22 @@ export function assignTypeVar(
             !isTypeVarTuple(destType)
         ) {
             srcType = TypeVarType.cloneForUnpacked(srcType, /* isInUnion */ true);
+        }
+
+        if (MyPyrightExtensions.isMappedType(destType) || MyPyrightExtensions.isMappedType(srcType)) {
+            const mapSpecs = MyPyrightExtensions.deconstructMutualMappedTypes(evaluator, destType, srcType);
+            const destMapSpec = mapSpecs.mapSpec1;
+            const srcMapSpec = mapSpecs.mapSpec2;
+            return (
+                evaluator.assignType(
+                    destMapSpec.map,
+                    srcMapSpec.map,
+                    diag,
+                    constraints?.clone(),
+                    flags,
+                    recursionCount + 1
+                ) && evaluator.assignType(destMapSpec.arg, srcMapSpec.arg, diag, constraints, flags, recursionCount + 1)
+            );
         }
 
         // Handle the constrained case. This case needs to be handled specially
@@ -624,7 +645,9 @@ function assignUnconstrainedTypeVar(
 
     let curUpperBound = curEntry?.upperBound;
     if (!curUpperBound && !TypeVarType.isSelf(destType)) {
-        curUpperBound = destType.shared.boundType;
+        curUpperBound = MyPyrightExtensions.isMappedType(destType)
+            ? destType.shared.mappedBoundType
+            : destType.shared.boundType;
     }
     let curLowerBound = curEntry?.lowerBound;
     let newLowerBound = curLowerBound;
@@ -928,7 +951,10 @@ function assignUnconstrainedTypeVar(
     }
 
     // If there's a bound type, make sure the source is assignable to it.
-    if (destType.shared.boundType) {
+    const destBoundType = MyPyrightExtensions.isMappedType(destType)
+        ? destType.shared.mappedBoundType
+        : destType.shared.boundType;
+    if (destBoundType) {
         const updatedType = (newLowerBound || newUpperBound)!;
 
         // If the dest is a Type[T] but the source is not a valid Type,
@@ -945,7 +971,7 @@ function assignUnconstrainedTypeVar(
 
         if (
             !evaluator.assignType(
-                destType.shared.boundType,
+                destBoundType,
                 evaluator.makeTopLevelTypeVarsConcrete(updatedType),
                 diag?.createAddendum(),
                 effectiveConstraints,
@@ -959,7 +985,7 @@ function assignUnconstrainedTypeVar(
                 diag?.addMessage(
                     LocAddendum.typeBound().format({
                         sourceType: evaluator.printType(updatedType),
-                        destType: evaluator.printType(destType.shared.boundType),
+                        destType: evaluator.printType(destBoundType),
                         name: TypeVarType.getReadableName(destType),
                     })
                 );

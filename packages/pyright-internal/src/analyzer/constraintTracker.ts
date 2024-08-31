@@ -10,6 +10,7 @@
  */
 
 import { assert } from '../common/debug';
+import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
 import { getComplexityScoreForType } from './typeComplexity';
 import { Type, TypeVarScopeId, TypeVarType, isTypeSame } from './types';
 
@@ -121,8 +122,13 @@ export class ConstraintSet {
         return score;
     }
 
+    typeVarKey(typeVar: TypeVarType) {
+        const keyBase = TypeVarType.getNameWithScope(typeVar);
+        return MyPyrightExtensions.isMappedType(typeVar) ? `${keyBase}-mapped` : keyBase;
+    }
+
     setBounds(typeVar: TypeVarType, lowerBound: Type | undefined, upperBound?: Type, retainLiterals?: boolean) {
-        const key = TypeVarType.getNameWithScope(typeVar);
+        const key = this.typeVarKey(typeVar);
         this._typeVarMap.set(key, {
             typeVar,
             lowerBound,
@@ -136,7 +142,7 @@ export class ConstraintSet {
     }
 
     getTypeVar(typeVar: TypeVarType): TypeVarConstraints | undefined {
-        const key = TypeVarType.getNameWithScope(typeVar);
+        const key = this.typeVarKey(typeVar);
         return this._typeVarMap.get(key);
     }
 
