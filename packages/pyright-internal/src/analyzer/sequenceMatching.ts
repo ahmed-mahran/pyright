@@ -482,13 +482,13 @@ export function traverseAccumulateSequence<A, B, Acc>(
         // to node (j + 1), or equivalently, if we are at node i and node j is repeated,
         // we can stay at node i and just move to next node (j + 1)
         const t_i_steps = [
-            i + 1,
             ...(is_repeated_a_i ? [i] : []),
+            i + 1,
             ...(is_repeated_a_i_next && i + 2 < a_sequence.length ? [i + 2] : []),
         ];
         const t_j_steps = [
-            j + 1,
             ...(is_repeated_b_j ? [j] : []),
+            j + 1,
             ...(is_repeated_b_j_next && j + 2 < b_sequence.length ? [j + 2] : []),
         ];
         // be careful not to stay at the same state where (i, j) = (i_step, j_step)
