@@ -1,8 +1,12 @@
 from abc import ABC
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+  from typing import type_check_only
 
 class _MyPyright(ABC):
   ...
 
-class Map[F, T](_MyPyright):
+@type_check_only
+class Map[F, *Ts](_MyPyright):
   ...
-
