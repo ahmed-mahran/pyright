@@ -28,7 +28,8 @@ export function matchSequence<DestType, SrcType>(
     isRepeatedSrc: (src: SrcType | undefined) => boolean,
     destMatchesSrc: (dest: DestType, src: SrcType) => boolean,
     destStr: (dest: DestType | undefined) => string,
-    srcStr: (src: SrcType | undefined) => string
+    srcStr: (src: SrcType | undefined) => string,
+    recursionCount: number
 ): boolean {
     class MatchSequenceAccumulator implements SequenceAccumulator<DestType, SrcType, boolean> {
         acc: boolean;
@@ -75,7 +76,8 @@ export function matchSequence<DestType, SrcType>(
         isRepeatedSrc,
         new MatchSequenceAccumulator(),
         destStr,
-        srcStr
+        srcStr,
+        recursionCount
     );
 
     return acc?.value === true;
@@ -88,7 +90,8 @@ export function matchAccumulateSequence<DestType, SrcType>(
     isRepeatedSrc: (src: SrcType | undefined) => boolean,
     destMatchesSrc: (dest: DestType, src: SrcType) => boolean,
     destStr: (dest: DestType | undefined) => string,
-    srcStr: (src: SrcType | undefined) => string
+    srcStr: (src: SrcType | undefined) => string,
+    recursionCount: number
 ): { destSequence: DestType[]; srcSequence: SrcType[] }[] | undefined {
     class MatchAccumulateSequenceAccumulator
         implements SequenceAccumulator<DestType, SrcType, { destSequence: DestType[]; srcSequence: SrcType[] }[]>
@@ -213,7 +216,8 @@ export function matchAccumulateSequence<DestType, SrcType>(
         isRepeatedSrc,
         new MatchAccumulateSequenceAccumulator(),
         destStr,
-        srcStr
+        srcStr,
+        recursionCount
     );
 
     return acc?.value;
@@ -228,7 +232,8 @@ export function getCommonSequence<DestType, SrcType, CommonType>(
     getCommon: (dest: DestType | undefined, src: SrcType | undefined) => CommonType | undefined,
     destStr: (dest: DestType | undefined) => string,
     srcStr: (src: SrcType | undefined) => string,
-    commonStr: (common: CommonType | undefined) => string
+    commonStr: (common: CommonType | undefined) => string,
+    recursionCount: number
 ): CommonType[] | undefined {
     class CommonSequenceAccumulator implements SequenceAccumulator<DestType, SrcType, CommonType[]> {
         acc: CommonType[];
@@ -278,7 +283,8 @@ export function getCommonSequence<DestType, SrcType, CommonType>(
         isRepeatedSrc,
         new CommonSequenceAccumulator(),
         destStr,
-        srcStr
+        srcStr,
+        recursionCount
     );
 
     return acc?.value;
@@ -352,7 +358,8 @@ export function traverseAccumulateSequence<A, B, Acc>(
     is_repeated_b: (b: B | undefined) => boolean,
     acc: SequenceAccumulator<A, B, Acc>,
     a_str: (a: A | undefined) => string,
-    b_str: (b: B | undefined) => string
+    b_str: (b: B | undefined) => string,
+    recursionCount: number
 ): SequenceAccumulator<A, B, Acc> | undefined {
     /**
       This is a complex operation that concurrently traverses two sequences list[A] and list[B],
@@ -369,9 +376,9 @@ export function traverseAccumulateSequence<A, B, Acc>(
       reducable pairs in the next step, i.e. all next/1-hop (A, B) pairs reduce to None. This function
       returns accumulation of the first encountered accumulatable traversal.
     */
-
+    const spaces = ' '.repeat(recursionCount);
     const baseline = function (indent: string, content: string) {
-        console.debug(`[acc_sequence] ${indent}${content}`);
+        console.debug(`${spaces}[acc_sequence] ${indent}${content}`);
         return;
     };
 
