@@ -27,17 +27,17 @@ export class ConstraintSolutionSet {
     getType(typeVar: ParamSpecType): FunctionType | undefined;
     getType(typeVar: TypeVarType): Type | undefined;
     getType(typeVar: TypeVarType): Type | undefined {
-        const key = TypeVarType.getNameWithScope(typeVar);
+        const key = TypeVarType.getKey(typeVar);
         return this._typeVarMap.get(key);
     }
 
     setType(typeVar: TypeVarType, type: Type | undefined) {
-        const key = TypeVarType.getNameWithScope(typeVar);
+        const key = TypeVarType.getKey(typeVar);
         return this._typeVarMap.set(key, type);
     }
 
     hasType(typeVar: TypeVarType): boolean {
-        const key = TypeVarType.getNameWithScope(typeVar);
+        const key = TypeVarType.getKey(typeVar);
         return this._typeVarMap.has(key);
     }
 

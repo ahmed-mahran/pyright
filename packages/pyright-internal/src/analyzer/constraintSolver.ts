@@ -168,16 +168,19 @@ export function assignTypeVar(
             const mapSpecs = MyPyrightExtensions.deconstructMutualMappedTypes(evaluator, destType, srcType);
             const destMapSpec = mapSpecs.mapSpec1;
             const srcMapSpec = mapSpecs.mapSpec2;
-            return (
-                evaluator.assignType(
+            if (
+                !evaluator.assignType(
                     destMapSpec.map,
                     srcMapSpec.map,
                     diag,
                     constraints?.clone(),
                     flags,
                     recursionCount + 1
-                ) && evaluator.assignType(destMapSpec.arg, srcMapSpec.arg, diag, constraints, flags, recursionCount + 1)
-            );
+                ) ||
+                !evaluator.assignType(destMapSpec.arg, srcMapSpec.arg, diag, constraints, flags, recursionCount + 1)
+            ) {
+                return false;
+            }
         }
 
         // Handle the constrained case. This case needs to be handled specially
@@ -996,6 +999,30 @@ function assignUnconstrainedTypeVar(
     }
 
     if (constraints && !constraints.isLocked()) {
+        if (MyPyrightExtensions.isMappedType(destType)) {
+            // we need to set bounds for the un-mapped destType
+            const destTypeMapSpec = MyPyrightExtensions.deconstructMappedType(evaluator, destType);
+            const newLowerBoundMapSpec = newLowerBound
+                ? MyPyrightExtensions.deconstructMappedType(evaluator, newLowerBound, destTypeMapSpec.map)
+                : undefined;
+            const newUpperBoundMapSpec = newUpperBound
+                ? MyPyrightExtensions.deconstructMappedType(evaluator, newUpperBound, destTypeMapSpec.map)
+                : undefined;
+            constraints.setBounds(
+                MyPyrightExtensions.unsetFlagMapped(TypeBase.cloneType(destType)), // destTypeMapSpec.arg,
+                newLowerBoundMapSpec?.arg,
+                newUpperBoundMapSpec?.arg
+            );
+        } else if (destType.shared.mappedBoundType) {
+            // destType is not flagged mapped but has mapped bound
+            // we need to set bounds for mapped destType
+            const map = destType.shared.mappedBoundType;
+            constraints.setBounds(
+                MyPyrightExtensions.setFlagMapped(TypeBase.cloneType(destType)),
+                MyPyrightExtensions.convertToMappedType(map, newLowerBound),
+                MyPyrightExtensions.convertToMappedType(map, newUpperBound)
+            );
+        }
         constraints.setBounds(
             destType,
             newLowerBound,

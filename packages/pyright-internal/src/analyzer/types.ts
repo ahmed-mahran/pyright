@@ -11,6 +11,7 @@ import { assert } from '../common/debug';
 import { Uri } from '../common/uri/uri';
 import { ArgumentNode, ExpressionNode, NameNode, ParamCategory } from '../parser/parseNodes';
 import { ClassDeclaration, FunctionDeclaration, SpecialBuiltInClassDeclaration } from './declaration';
+import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
 import { Symbol, SymbolTable } from './symbol';
 
 export const enum TypeCategory {
@@ -3015,6 +3016,11 @@ export namespace TypeVarType {
     export function getNameWithScope(typeVarType: TypeVarType) {
         // If there is no name with scope, fall back on the (unscoped) name.
         return typeVarType.priv.nameWithScope || typeVarType.shared.name;
+    }
+
+    export function getKey(typeVarType: TypeVarType) {
+        const keyBase = TypeVarType.getNameWithScope(typeVarType);
+        return MyPyrightExtensions.isMappedType(typeVarType) ? `${keyBase}-mapped` : keyBase;
     }
 
     export function getReadableName(type: TypeVarType) {
