@@ -1534,7 +1534,11 @@ export function createTypeEvaluator(
             makeInferenceContext(iterExpectedType)
         );
         const iterType = iterTypeResult.type;
-        if ((flags & EvalFlags.NoTypeVarTuple) === 0 && isTypeVarTuple(iterType) && !iterType.priv.isUnpacked) {
+        if (
+            (flags & EvalFlags.NoTypeVarTuple) === 0 &&
+            isTypeVarTuple(iterType) &&
+            (!iterType.priv.isUnpacked || MyPyrightExtensions.isMappedType(iterType))
+        ) {
             typeResult = { type: TypeVarType.cloneForUnpacked(iterType) };
         } else if (
             (flags & EvalFlags.AllowUnpackedTuple) !== 0 &&
