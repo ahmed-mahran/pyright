@@ -1428,7 +1428,9 @@ function logTypeVarConstraintSet(evaluator: TypeEvaluator, context: ConstraintSe
     let loggedConstraint = false;
 
     context.getTypeVars().forEach((entry) => {
-        const typeVarName = `${indent}${entry.typeVar.shared.name}`;
+        const typeVarName = `${indent}${entry.typeVar.shared.name}${
+            MyPyrightExtensions.isMappedType(entry.typeVar) ? '()' : ''
+        }`;
         const lowerBound = entry.lowerBound;
         const upperBound = entry.upperBound;
 
