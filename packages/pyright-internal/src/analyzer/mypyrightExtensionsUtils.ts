@@ -76,11 +76,7 @@ export namespace MyPyrightExtensions {
     // Map[type, int, T, *Ts]  ==== tuple[type[int], type[T], *Ts: type]
     // Map[type, int]  ==== type[int]
     // Map[type, T]  ==== type[T]
-    // Map[type, *Ts]  ==== tuple[*Ts: type, ...]
-    // ; e.g. for __getitem__(self, items), items can be a single item or a
-    // packed tuple of items in case of more than one item, this is why
-    // we convert Map[type, *Ts] to a tuple (tuple[*Ts: type, ...]) instead
-    // of (*Ts: type)
+    // Map[type, *Ts]  ==== *Ts: type
     function handleMap(evaluator: TypeEvaluator, type: ClassType): Type {
         if (type.priv.typeArgs) {
             const map = type.priv.typeArgs[0];
@@ -164,8 +160,16 @@ export namespace MyPyrightExtensions {
             // Now we return map of Union because it is simplier and doesn't
             // seem to be wrong.
             if (type && isTypeVarTuple(type)) {
-                type.shared.boundType = type.shared.mappedBoundType = _convertToMappedType(map, type.shared.boundType);
-                return type;
+                type.shared.mappedBoundType = _convertToMappedType(map, type.shared.boundType);
+                return TypeBase.cloneType(type);
+            } else if (type && isClass(type) && isTupleClass(type) && !!type.priv.isUnpacked) {
+                const clone = TypeBase.cloneType(type);
+                clone.priv.tupleTypeArgs = type.priv.tupleTypeArgs?.map((arg) => ({
+                    type: _convertToMappedType(map, arg.type),
+                    isUnbounded: arg.isUnbounded,
+                    isOptional: arg.isOptional,
+                }));
+                return clone;
             } else {
                 return specializeMapType(map, type);
             }
@@ -200,7 +204,7 @@ export namespace MyPyrightExtensions {
                         baseMap.priv.tupleTypeArgs?.length === type.priv.tupleTypeArgs?.length &&
                         (baseMap.priv.tupleTypeArgs ?? []).find(
                             (arg, i) => i > 0 && !isTypeSame(arg.type, (type.priv.tupleTypeArgs ?? [])[i].type)
-                        ) !== undefined)
+                        ) === undefined)
                 ) {
                     return {
                         map: unsetFlagMapped(specializeMapType(type)),
