@@ -138,7 +138,8 @@ export function assignTupleTypeArgs(
             matchedTypeArgs.forEach((pair) => {
                 if (pair.destSequence.length === 1 && isTypeVarTuple(pair.destSequence[0].type)) {
                     if (pair.srcSequence.length === 1 && isTypeVarTuple(pair.srcSequence[0].type)) {
-                        evaluator.assignType(
+                        assignTypeVar(
+                            evaluator,
                             pair.destSequence[0].type,
                             pair.srcSequence[0].type,
                             diag,
@@ -149,7 +150,8 @@ export function assignTupleTypeArgs(
                     } else {
                         const srcArgType = createVariadicTuple(pair.srcSequence, tupleClass);
                         if (srcArgType) {
-                            evaluator.assignType(
+                            assignTypeVar(
+                                evaluator,
                                 pair.destSequence[0].type,
                                 srcArgType,
                                 diag,
@@ -342,7 +344,9 @@ export function matchTupleTypeArgs(
                     return (
                         //TODO: either freeTypeVar or (bound and constraints) but maybe check whether type is complete
                         (!type.priv.freeTypeVar || isUniversal(type.priv.freeTypeVar)) &&
-                        (!type.shared.boundType || isUniversal(type.shared.boundType)) &&
+                        (MyPyrightExtensions.isMappedType(type)
+                            ? !type.shared.mappedBoundType || isUniversal(type.shared.mappedBoundType)
+                            : !type.shared.boundType || isUniversal(type.shared.boundType)) &&
                         type.shared.constraints.find((c) => !isUniversal(c)) === undefined
                     );
                 }
