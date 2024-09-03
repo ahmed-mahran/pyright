@@ -1108,9 +1108,9 @@ export function createTypeEvaluator(
         // the target name node won't have a corresponding type cached speculatively.
         const allowSpeculativeCaching = node.nodeType !== ParseNodeType.AssignmentExpression;
 
-        typeResult.type = MyPyrightExtensions.handleTypeForGetTypeOfExpression(
+        typeResult = MyPyrightExtensions.handleTypeForGetTypeOfExpression(
             evaluatorInterface,
-            typeResult.type,
+            typeResult,
             node,
             flags,
             constraints,
@@ -23607,17 +23607,16 @@ export function createTypeEvaluator(
                     destType,
                     srcType
                 );
-                const destMapSpec = mapSpecs.mapSpec1;
-                const srcMapSpec = mapSpecs.mapSpec2;
                 return (
+                    !!mapSpecs &&
                     assignType(
-                        destMapSpec.map,
-                        srcMapSpec.map,
+                        mapSpecs.destMapSpec.arg,
+                        mapSpecs.srcMapSpec.arg,
                         diag,
-                        constraints?.clone(),
+                        constraints,
                         flags,
                         recursionCount + 1
-                    ) && assignType(destMapSpec.arg, srcMapSpec.arg, diag, constraints, flags, recursionCount + 1)
+                    )
                 );
             }
 

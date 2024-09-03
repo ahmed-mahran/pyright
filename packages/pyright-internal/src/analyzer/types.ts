@@ -745,6 +745,11 @@ export interface ClassDetailsPriv {
     // tuple. We need to be able to distinguish this case from normal tuples.
     isUnpacked?: boolean | undefined;
 
+    // For tuples, mypyright_extensions.Map is converted to a tuple, this
+    // flag is to distinguish mypyright_extensions.Map tuple from
+    // other natural tuples.
+    isMapTuple?: boolean | undefined;
+
     // If type arguments are present, were they explicit (i.e.
     // provided explicitly in the code)?
     isTypeArgExplicit?: boolean | undefined;
