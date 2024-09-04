@@ -3066,7 +3066,7 @@ export namespace TypeVarType {
     }
 
     export function hasBound(type: TypeVarType) {
-        return !!type.shared.boundType;
+        return MyPyrightExtensions.isMappedType(type) ? !!type.shared.mappedBoundType : !!type.shared.boundType;
     }
 }
 
