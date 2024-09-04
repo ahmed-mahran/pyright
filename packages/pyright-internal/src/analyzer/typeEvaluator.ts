@@ -23605,14 +23605,17 @@ export function createTypeEvaluator(
                 );
                 return (
                     !!mapSpecs &&
-                    assignType(
-                        mapSpecs.destMapSpec.arg,
-                        mapSpecs.srcMapSpec.arg,
-                        diag,
-                        constraints,
-                        flags,
-                        recursionCount + 1
-                    )
+                    ((mapSpecs.destMapSpec.arg === undefined && mapSpecs.srcMapSpec.arg === undefined) ||
+                        (!!mapSpecs.destMapSpec.arg &&
+                            !!mapSpecs.srcMapSpec.arg &&
+                            assignType(
+                                mapSpecs.destMapSpec.arg,
+                                mapSpecs.srcMapSpec.arg,
+                                diag,
+                                constraints,
+                                flags,
+                                recursionCount + 1
+                            )))
                 );
             }
 

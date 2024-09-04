@@ -253,12 +253,12 @@ export namespace MyPyrightExtensions {
 
     export interface MapSpec {
         map: MapType;
-        arg: Type;
+        arg?: Type;
     }
 
     interface InternalMapSpec {
         map?: MapType;
-        arg: Type;
+        arg?: Type;
     }
 
     export function deconstructMappedType1(evaluator: TypeEvaluator, type: Type): MapSpec {
@@ -283,29 +283,40 @@ export namespace MyPyrightExtensions {
                                     isOptional: a.isOptional,
                                 };
                             }) ?? [];
+                        const hasErrors =
+                            // at least one map is empty
+                            deconstructions.some((d) => !d.map) ||
+                            // at least one arg is empty but not all
+                            (deconstructions.some((d) => !d.arg) && !forAll(deconstructions, (d) => !d.arg));
+                        if (hasErrors) {
+                            return {};
+                        }
                         const concreteMaps = deconstructions.map((d) => d.map).filter((m) => !!m);
                         const map = MapType.combine(concreteMaps);
-                        const arg = unsetFlagMapped(
-                            ClassType.cloneAsInstance(
-                                specializeTupleClass(
-                                    type,
-                                    deconstructions.map((a) => ({
-                                        type: a.arg,
-                                        isUnbounded: a.isUnbounded,
-                                        isOptional: a.isOptional,
-                                    }))
-                                )
+                        const concreteArgs = deconstructions
+                            .map((d) =>
+                                d.arg
+                                    ? {
+                                          type: d.arg,
+                                          isUnbounded: d.isUnbounded,
+                                          isOptional: d.isOptional,
+                                      }
+                                    : undefined
                             )
+                            .filter((a) => !!a);
+                        const arg = unsetFlagMapped(
+                            ClassType.cloneAsInstance(specializeTupleClass(type, concreteArgs))
                         );
                         arg.priv.isEmptyContainer = deconstructions.length === 0;
-                        return { map: map ?? new MapType(newUnknownType()), arg };
+                        return { map, arg };
                     }
 
                     const firstArg = firstOptional(type.priv.tupleTypeArgs)?.type ?? firstOptional(type.priv.typeArgs);
-                    const { map, arg } = _deconstructMappedType(
-                        firstArg ? TypeBase.cloneType(firstArg) : newUnknownType()
-                    );
-                    return { map: new MapType(specializeMapType(type), map), arg };
+                    const internalMapSpec = firstArg ? _deconstructMappedType(TypeBase.cloneType(firstArg)) : undefined;
+                    return {
+                        map: new MapType(specializeMapType(type), internalMapSpec?.map),
+                        arg: internalMapSpec?.arg,
+                    };
                 } else if (isTypeVar(type) && type.shared.mappedBoundType) {
                     //TODO handle constraints maybe?
                     const clone = unsetFlagMapped(TypeBase.cloneType(type));
@@ -315,7 +326,6 @@ export namespace MyPyrightExtensions {
                 } else {
                     return {
                         map: new MapType(specializeMapType(type)),
-                        arg: newUnknownType(),
                     };
                 }
             } else {
@@ -376,16 +386,35 @@ export namespace MyPyrightExtensions {
                                     return undefined;
                                 }
                             }) ?? [];
+                        const hasErrors =
+                            // at least one map is empty
+                            deconstructions.some((d) => !d?.deconstruction.map) ||
+                            // at least one arg is empty but not all
+                            (deconstructions.some((d) => !d?.deconstruction.arg) &&
+                                !forAll(deconstructions, (d) => !d?.deconstruction.arg));
+                        if (hasErrors) {
+                            return undefined;
+                        }
                         const concreteDeconstructions: {
                             deconstruction: InternalMapSpec;
                             isUnbounded: boolean;
                             isOptional?: boolean;
                         }[] = [];
                         const concreteMaps: MapType[] = [];
+                        const concreteArgs: TupleTypeArg[] = [];
                         deconstructions.forEach((d) => {
-                            if (d !== undefined && !!d.deconstruction.map) {
+                            if (d !== undefined) {
                                 concreteDeconstructions.push(d);
-                                concreteMaps.push(d.deconstruction.map);
+                                if (d.deconstruction.map) {
+                                    concreteMaps.push(d.deconstruction.map);
+                                }
+                                if (d.deconstruction.arg) {
+                                    concreteArgs.push({
+                                        type: d.deconstruction.arg,
+                                        isUnbounded: d.isUnbounded,
+                                        isOptional: d.isOptional,
+                                    });
+                                }
                             }
                         });
                         if (deconstructions.length !== concreteMaps.length) {
@@ -393,16 +422,7 @@ export namespace MyPyrightExtensions {
                         }
                         const map = MapType.combine(concreteMaps);
                         const arg = unsetFlagMapped(
-                            ClassType.cloneAsInstance(
-                                specializeTupleClass(
-                                    type,
-                                    concreteDeconstructions.map((a) => ({
-                                        type: a.deconstruction.arg,
-                                        isUnbounded: a.isUnbounded,
-                                        isOptional: a.isOptional,
-                                    }))
-                                )
-                            )
+                            ClassType.cloneAsInstance(specializeTupleClass(type, concreteArgs))
                         );
                         arg.priv.isEmptyContainer = deconstructions.length === 0;
                         return map ? { map, arg } : undefined;
@@ -413,10 +433,9 @@ export namespace MyPyrightExtensions {
                             : ClassType.isDerivedFrom(type, baseMap.outer))
                     ) {
                         const arg = firstOptional(type.priv.tupleTypeArgs)?.type ?? firstOptional(type.priv.typeArgs);
-                        const innerMapSpec = _deconstructMappedType2(
-                            arg ? TypeBase.cloneType(arg) : newUnknownType(),
-                            baseMap.inner
-                        );
+                        const innerMapSpec = arg
+                            ? _deconstructMappedType2(TypeBase.cloneType(arg), baseMap.inner)
+                            : undefined;
                         return innerMapSpec
                             ? { map: new MapType(specializeMapType(type), innerMapSpec.map), arg: innerMapSpec.arg }
                             : undefined;
@@ -562,6 +581,12 @@ export namespace MyPyrightExtensions {
 
     export function firstOptional<T>(ts: T[] | undefined): T | undefined {
         return ts?.find((_, i) => i === 0);
+    }
+
+    // returns true if the collection is empty or the given predicate holds for all the elements
+    //, otherwise it returns false
+    export function forAll<T>(ts: T[], predicate: (t: T) => boolean): boolean {
+        return ts.find((t) => !predicate(t)) === undefined;
     }
 
     function newUnknownType() {

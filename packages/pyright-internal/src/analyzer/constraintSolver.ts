@@ -168,13 +168,18 @@ export function assignTypeVar(
             const mapSpecs = MyPyrightExtensions.deconstructMutualMappedTypes(evaluator, destType, srcType);
             if (
                 !mapSpecs ||
-                !evaluator.assignType(
-                    mapSpecs.destMapSpec.arg,
-                    mapSpecs.srcMapSpec.arg,
-                    diag,
-                    constraints,
-                    flags,
-                    recursionCount + 1
+                !(
+                    (mapSpecs.destMapSpec.arg === undefined && mapSpecs.srcMapSpec.arg === undefined) ||
+                    (!!mapSpecs.destMapSpec.arg &&
+                        !!mapSpecs.srcMapSpec.arg &&
+                        evaluator.assignType(
+                            mapSpecs.destMapSpec.arg,
+                            mapSpecs.srcMapSpec.arg,
+                            diag,
+                            constraints,
+                            flags,
+                            recursionCount + 1
+                        ))
                 )
             ) {
                 return false;
