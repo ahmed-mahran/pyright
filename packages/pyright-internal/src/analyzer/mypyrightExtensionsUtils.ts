@@ -287,7 +287,7 @@ export namespace MyPyrightExtensions {
                             // at least one map is empty
                             deconstructions.some((d) => !d.map) ||
                             // at least one arg is empty but not all
-                            (deconstructions.some((d) => !d.arg) && !forAll(deconstructions, (d) => !d.arg));
+                            (deconstructions.some((d) => !d.arg) && !deconstructions.every((d) => !d.arg));
                         if (hasErrors) {
                             return {};
                         }
@@ -311,7 +311,9 @@ export namespace MyPyrightExtensions {
                         return { map, arg };
                     }
 
-                    const firstArg = firstOptional(type.priv.tupleTypeArgs)?.type ?? firstOptional(type.priv.typeArgs);
+                    const firstArg = isTupleClass(type)
+                        ? firstOptional(type.priv.tupleTypeArgs)?.type
+                        : firstOptional(type.priv.typeArgs);
                     const internalMapSpec = firstArg ? _deconstructMappedType(TypeBase.cloneType(firstArg)) : undefined;
                     return {
                         map: new MapType(specializeMapType(type), internalMapSpec?.map),
@@ -368,10 +370,11 @@ export namespace MyPyrightExtensions {
                         isTupleClass(type) &&
                         (!isClass(baseMap.outer) ||
                             !isTupleClass(baseMap.outer) ||
-                            baseMap.outer.priv.tupleTypeArgs?.length !== type.priv.tupleTypeArgs?.length ||
-                            (baseMap.outer.priv.tupleTypeArgs ?? []).find(
+                            (baseMap.outer.priv.tupleTypeArgs?.length ?? 1) !==
+                                (type.priv.tupleTypeArgs?.length ?? 1) ||
+                            (baseMap.outer.priv.tupleTypeArgs ?? []).some(
                                 (arg, i) => i > 0 && !isTypeSame(arg.type, (type.priv.tupleTypeArgs ?? [])[i].type)
-                            ) !== undefined)
+                            ))
                     ) {
                         const deconstructions =
                             type.priv.tupleTypeArgs?.map((a) => {
@@ -391,7 +394,7 @@ export namespace MyPyrightExtensions {
                             deconstructions.some((d) => !d?.deconstruction.map) ||
                             // at least one arg is empty but not all
                             (deconstructions.some((d) => !d?.deconstruction.arg) &&
-                                !forAll(deconstructions, (d) => !d?.deconstruction.arg));
+                                !deconstructions.every((d) => !d?.deconstruction.arg));
                         if (hasErrors) {
                             return undefined;
                         }
@@ -538,6 +541,11 @@ export namespace MyPyrightExtensions {
                 )
             );
             mapped.priv.isUnpacked &&= !!map.priv.tupleTypeArgs && map.priv.tupleTypeArgs.length > 0;
+            // if there is no argument (!type) and tuple has only one argument to specialize (tupleTypeArgs?.length === 1)
+            // then let's set it to undefined so as not to propagate useless types (e.g. Unknown)
+            if (!type && mapped.priv.tupleTypeArgs?.length === 1) {
+                mapped.priv.tupleTypeArgs = undefined;
+            }
         } else {
             mapped = ClassType.specialize(
                 map,
@@ -545,7 +553,13 @@ export namespace MyPyrightExtensions {
                 undefined,
                 undefined
             );
+            // if there is no argument (!type) and class has only one argument to specialize (typeArgs?.length === 1)
+            // then let's set it to undefined so as not to propagate useless types (e.g. Unknown)
+            if (!type && mapped.priv.typeArgs?.length === 1) {
+                mapped.priv.typeArgs = undefined;
+            }
         }
+
         return ClassType.cloneAsInstance(mapped);
     }
 
@@ -581,12 +595,6 @@ export namespace MyPyrightExtensions {
 
     export function firstOptional<T>(ts: T[] | undefined): T | undefined {
         return ts?.find((_, i) => i === 0);
-    }
-
-    // returns true if the collection is empty or the given predicate holds for all the elements
-    //, otherwise it returns false
-    export function forAll<T>(ts: T[], predicate: (t: T) => boolean): boolean {
-        return ts.find((t) => !predicate(t)) === undefined;
     }
 
     function newUnknownType() {
