@@ -91,6 +91,7 @@ export function matchAccumulateSequence<DestType, SrcType>(
     destMatchesSrc: (dest: DestType, src: SrcType) => boolean,
     destStr: (dest: DestType | undefined) => string,
     srcStr: (src: SrcType | undefined) => string,
+    destEmptyType: DestType,
     recursionCount: number
 ): { destSequence: DestType[]; srcSequence: SrcType[] }[] | undefined {
     class MatchAccumulateSequenceAccumulator
@@ -125,26 +126,21 @@ export function matchAccumulateSequence<DestType, SrcType>(
                     },
                     (lastAcc) => {
                         const lastDestType = lastAcc.destSequence[lastAcc.destSequence.length - 1];
-                        const lastSrcType = lastAcc.srcSequence[lastAcc.srcSequence.length - 1];
-                        if (
-                            ((isRepeatedDest(destType) || isRepeatedDest(lastDestType)) && destType !== lastDestType) ||
-                            ((isRepeatedSrc(srcType) || isRepeatedSrc(lastSrcType)) && srcType !== lastSrcType)
-                        ) {
+                        if ((isRepeatedDest(destType) || isRepeatedDest(lastDestType)) && destType !== lastDestType) {
                             copy.acc.push({ destSequence: [destType], srcSequence: [srcType] });
                         } else {
-                            function push<T>(t: T | undefined, ts: T[], isRepeated: (t: T | undefined) => boolean) {
+                            function push<T>(t: T, ts: T[], isRepeated: (t: T | undefined) => boolean) {
                                 if (
-                                    t !== undefined &&
-                                    (ts.length === 0 ||
-                                        !isRepeated(t) ||
-                                        !isRepeated(ts[ts.length - 1]) ||
-                                        ts[ts.length - 1] !== t)
+                                    ts.length === 0 ||
+                                    !isRepeated(t) ||
+                                    !isRepeated(ts[ts.length - 1]) ||
+                                    ts[ts.length - 1] !== t
                                 ) {
                                     ts.push(t);
                                 }
                             }
                             push(destType, lastAcc.destSequence, isRepeatedDest);
-                            push(srcType, lastAcc.srcSequence, isRepeatedSrc);
+                            lastAcc.srcSequence.push(srcType);
                         }
                     }
                 );
@@ -152,13 +148,11 @@ export function matchAccumulateSequence<DestType, SrcType>(
                 // srcType matches zero dest
                 copy._withLastAcc(
                     (/* onEmpty */) => {
-                        copy.acc.push({ destSequence: [], srcSequence: [srcType] });
+                        copy.acc.push({ destSequence: [destEmptyType], srcSequence: [srcType] });
                     },
                     (lastAcc) => {
-                        const lastSrcType = lastAcc.srcSequence[lastAcc.srcSequence.length - 1];
-                        if (srcType !== lastSrcType) {
-                            copy.acc.push({ destSequence: [], srcSequence: [srcType] });
-                        }
+                        lastAcc.destSequence.push(destEmptyType);
+                        lastAcc.srcSequence.push(srcType);
                     }
                 );
             } else if (destType !== undefined && isRepeatedDest(destType) && srcType === undefined) {
