@@ -10,7 +10,9 @@
  */
 
 import { assert } from '../common/debug';
+import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
 import { getComplexityScoreForType } from './typeComplexity';
+import { TypeEvaluator } from './typeEvaluatorTypes';
 import { Type, TypeVarScopeId, TypeVarType, isTypeSame } from './types';
 
 // The maximum number of constraint sets that can be associated
@@ -186,12 +188,12 @@ export class ConstraintTracker {
     private _isLocked = false;
     private _constraintSets: ConstraintSet[];
 
-    constructor() {
+    constructor(private _evaluator: TypeEvaluator) {
         this._constraintSets = [new ConstraintSet()];
     }
 
     clone() {
-        const newTypeVarMap = new ConstraintTracker();
+        const newTypeVarMap = new ConstraintTracker(this._evaluator);
 
         newTypeVarMap._constraintSets = this._constraintSets.map((set) => set.clone());
         newTypeVarMap._isLocked = this._isLocked;
@@ -270,8 +272,10 @@ export class ConstraintTracker {
     setBounds(typeVar: TypeVarType, lowerBound: Type | undefined, upperBound?: Type, retainLiterals?: boolean) {
         // assert(!this._isLocked);
         if (!this._isLocked) {
+            const adjustedLowerBound = MyPyrightExtensions.createBoundForTypeVar(this._evaluator, typeVar, lowerBound);
+            const adjustedUpperBound = MyPyrightExtensions.createBoundForTypeVar(this._evaluator, typeVar, upperBound);
             return this._constraintSets.forEach((set) => {
-                set.setBounds(typeVar, lowerBound, upperBound, retainLiterals);
+                set.setBounds(typeVar, adjustedLowerBound, adjustedUpperBound, retainLiterals);
             });
         }
     }

@@ -2750,7 +2750,7 @@ export function createTypeEvaluator(
             const diag = errorNode ? new DiagnosticAddendum() : undefined;
 
             if (isClassInstance(subtype)) {
-                const constraints = new ConstraintTracker();
+                const constraints = new ConstraintTracker(evaluatorInterface);
 
                 if (assignType(awaitableProtocolObj, subtype, diag, constraints)) {
                     const specializedType = solveAndApplyConstraints(awaitableProtocolObj, constraints);
@@ -3884,21 +3884,37 @@ export function createTypeEvaluator(
             }
 
             if (isTypeVarTuple(subtype)) {
-                // If it's in a union, convert to type or object.
-                if (subtype.priv.isInUnion) {
-                    if (TypeBase.isInstantiable(subtype)) {
-                        if (typeClass && isInstantiableClass(typeClass)) {
-                            return typeClass;
-                        }
-                    } else {
-                        return getObjectType();
-                    }
+                const boundType = MyPyrightExtensions.isMappedType(subtype)
+                    ? subtype.shared.mappedBoundType
+                    : subtype.shared.boundType;
 
-                    return AnyType.create();
+                // if (!boundType) {
+                //     return subtype;
+                // }
+
+                // If it's in a union, convert to type or object.
+                const defaultType =
+                    subtype.priv.isInUnion && TypeBase.isInstantiable(subtype)
+                        ? typeClass && isInstantiableClass(typeClass)
+                            ? typeClass
+                            : AnyType.create()
+                        : getObjectType();
+
+                // Fall back to default if no bound is provided.
+                let args: TupleTypeArg[] = [{ type: defaultType, isUnbounded: true }];
+                if (!!boundType && isClass(boundType) && isTupleClass(boundType)) {
+                    args = boundType.priv.tupleTypeArgs ?? args;
                 }
 
-                // Fall back to "*tuple[object, ...]".
-                return makeTupleObject([{ type: getObjectType(), isUnbounded: true }], /* isUnpacked */ true);
+                if (TypeBase.isInstantiable(subtype)) {
+                    args = args.map((arg) => ({ ...arg, type: convertToInstantiable(arg.type) }));
+                }
+
+                if (subtype.priv.isInUnion) {
+                    return combineTypes(args.map((arg) => arg.type));
+                } else {
+                    return makeTupleObject(args, /* isUnpacked */ true);
+                }
             }
 
             if (isTypeVar(subtype)) {
@@ -3907,6 +3923,12 @@ export function createTypeEvaluator(
                 if (subtype.shared.recursiveAlias) {
                     return subtype;
                 }
+                // if (
+                //     subtype.shared.recursiveAlias ||
+                //     !(!!subtype.shared.boundType || TypeVarType.hasConstraints(subtype))
+                // ) {
+                //     return subtype;
+                // }
 
                 if (TypeVarType.hasConstraints(subtype)) {
                     const typesToCombine: Type[] = [];
@@ -5038,7 +5060,7 @@ export function createTypeEvaluator(
         ) {
             let reportMissingTypeArgs = false;
             const defaultTypeArgs: Type[] = [];
-            const constraints = new ConstraintTracker();
+            const constraints = new ConstraintTracker(evaluatorInterface);
 
             aliasInfo.typeParams.forEach((param) => {
                 if (!param.shared.isDefaultExplicit) {
@@ -6230,7 +6252,7 @@ export function createTypeEvaluator(
             }
 
             if (accessMethodClass) {
-                const constraints = new ConstraintTracker();
+                const constraints = new ConstraintTracker(evaluatorInterface);
                 accessMethodClass = selfSpecializeClass(accessMethodClass);
                 assignType(
                     ClassType.cloneAsInstance(accessMethodClass),
@@ -6927,7 +6949,7 @@ export function createTypeEvaluator(
             return { node, type: typeArgs[0].type };
         }
 
-        const constraints = new ConstraintTracker();
+        const constraints = new ConstraintTracker(evaluatorInterface);
         const diag = new DiagnosticAddendum();
 
         typeParams.forEach((param, index) => {
@@ -7967,7 +7989,7 @@ export function createTypeEvaluator(
                 }
             }
         } else {
-            const tupleConstraints = constraints ?? new ConstraintTracker();
+            const tupleConstraints = constraints ?? new ConstraintTracker(evaluatorInterface);
             if (
                 !addConstraintsForExpectedType(
                     evaluatorInterface,
@@ -8866,7 +8888,7 @@ export function createTypeEvaluator(
                 }
 
                 // Clone the constraints so we don't modify the original.
-                const effectiveConstraints = constraints?.clone() ?? new ConstraintTracker();
+                const effectiveConstraints = constraints?.clone() ?? new ConstraintTracker(evaluatorInterface);
                 effectiveConstraints.unlock();
 
                 // Use speculative mode so we don't output any diagnostics or
@@ -9122,7 +9144,7 @@ export function createTypeEvaluator(
                     const callResult = validateArgTypes(
                         errorNode,
                         match,
-                        new ConstraintTracker(),
+                        new ConstraintTracker(evaluatorInterface),
                         /* skipUnknownArgCheck */ true
                     );
 
@@ -9259,7 +9281,7 @@ export function createTypeEvaluator(
                 }
             }
 
-            const effectiveConstraints = constraints ?? new ConstraintTracker();
+            const effectiveConstraints = constraints ?? new ConstraintTracker(evaluatorInterface);
             effectiveConstraints.unlock();
 
             return validateArgTypesWithContext(
@@ -10910,7 +10932,7 @@ export function createTypeEvaluator(
                             strObjType &&
                             isClassInstance(strObjType)
                         ) {
-                            const mappingConstraints = new ConstraintTracker();
+                            const mappingConstraints = new ConstraintTracker(evaluatorInterface);
                             let isValidMappingType = false;
 
                             // If this was a TypeVar (e.g. for pseudo-generic classes),
@@ -11462,7 +11484,7 @@ export function createTypeEvaluator(
         // Prepopulate the constraints based on the specialized expected type.
         // This will allow us to more closely match the expected type if possible.
         if (isClassInstance(returnType) && isClassInstance(expectedType) && !isTypeSame(returnType, expectedType)) {
-            const tempConstraints = new ConstraintTracker();
+            const tempConstraints = new ConstraintTracker(evaluatorInterface);
             if (
                 addConstraintsForExpectedType(
                     evaluatorInterface,
@@ -11892,7 +11914,7 @@ export function createTypeEvaluator(
         return validateArgTypesWithContext(
             errorNode,
             matchResults,
-            constraints ?? new ConstraintTracker(),
+            constraints ?? new ConstraintTracker(evaluatorInterface),
             skipUnknownArgCheck,
             makeInferenceContext(
                 inferenceContext?.expectedType,
@@ -11967,7 +11989,7 @@ export function createTypeEvaluator(
 
         const matchResults = matchArgsToParams(errorNode, argList, { type: paramSpecType }, 0);
         const functionType = matchResults.overload;
-        const constraints = new ConstraintTracker();
+        const constraints = new ConstraintTracker(evaluatorInterface);
 
         if (matchResults.argumentErrors) {
             // Evaluate types of all args. This will ensure that referenced symbols are
@@ -12518,7 +12540,7 @@ export function createTypeEvaluator(
     function verifyTypeVarDefaultIsCompatible(typeVar: TypeVarType, defaultValueNode: ExpressionNode) {
         assert(typeVar.shared.isDefaultExplicit);
 
-        const constraints = new ConstraintTracker();
+        const constraints = new ConstraintTracker(evaluatorInterface);
         const concreteDefaultType = makeTopLevelTypeVarsConcrete(
             solveAndApplyConstraints(typeVar.shared.defaultType, constraints, {
                 replaceUnsolved: {
@@ -13437,7 +13459,7 @@ export function createTypeEvaluator(
                 return undefined;
             }
 
-            const dictConstraints = new ConstraintTracker();
+            const dictConstraints = new ConstraintTracker(evaluatorInterface);
             if (
                 !addConstraintsForExpectedType(
                     evaluatorInterface,
@@ -13798,7 +13820,7 @@ export function createTypeEvaluator(
                         addUnknown = false;
                     }
                 } else if (supportsKeysAndGetItemClass && isInstantiableClass(supportsKeysAndGetItemClass)) {
-                    const mappingConstraints = new ConstraintTracker();
+                    const mappingConstraints = new ConstraintTracker(evaluatorInterface);
 
                     supportsKeysAndGetItemClass = selfSpecializeClass(supportsKeysAndGetItemClass);
 
@@ -14051,7 +14073,7 @@ export function createTypeEvaluator(
             return undefined;
         }
 
-        const constraints = new ConstraintTracker();
+        const constraints = new ConstraintTracker(evaluatorInterface);
         if (
             !addConstraintsForExpectedType(
                 evaluatorInterface,
@@ -14184,7 +14206,7 @@ export function createTypeEvaluator(
             return inferenceContext.expectedType;
         }
 
-        const constraints = new ConstraintTracker();
+        const constraints = new ConstraintTracker(evaluatorInterface);
         const expectedType = inferenceContext.expectedType;
         let isCompatible = true;
 
@@ -14517,7 +14539,7 @@ export function createTypeEvaluator(
                         // If the expectedReturnType is generic, see if the actual return type
                         // provides types for some or all type variables.
                         if (requiresSpecialization(expectedReturnType)) {
-                            const constraints = new ConstraintTracker();
+                            const constraints = new ConstraintTracker(evaluatorInterface);
                             if (
                                 assignType(expectedReturnType, returnTypeResult.type, /* diag */ undefined, constraints)
                             ) {
@@ -17777,7 +17799,7 @@ export function createTypeEvaluator(
 
                                 validateArgType(
                                     argParam,
-                                    new ConstraintTracker(),
+                                    new ConstraintTracker(evaluatorInterface),
                                     { type: newMethodType },
                                     { skipUnknownArgCheck: true }
                                 );
@@ -20540,7 +20562,7 @@ export function createTypeEvaluator(
             }
         }
 
-        const constraints = new ConstraintTracker();
+        const constraints = new ConstraintTracker(evaluatorInterface);
 
         fullTypeParams.forEach((typeParam, index) => {
             if (typeArgs && index < typeArgs.length) {
@@ -23231,7 +23253,11 @@ export function createTypeEvaluator(
 
         // Handle tuple, which supports a variable number of type arguments.
         if (destType.priv.tupleTypeArgs && curSrcType.priv.tupleTypeArgs) {
-            return assignTupleTypeArgs(
+            const msg = `[assignClassWithTypeArgs] ${getPrintExpressionTypesSpaces()}${printType(
+                destType
+            )} =? ${printType(curSrcType)} < ${printType(srcType)}`;
+            console.log(msg);
+            const res = assignTupleTypeArgs(
                 evaluatorInterface,
                 destType,
                 curSrcType,
@@ -23240,6 +23266,8 @@ export function createTypeEvaluator(
                 flags,
                 recursionCount
             );
+            console.log(msg + ` ==> ${res}`);
+            return res;
         }
 
         if (destType.priv.typeArgs) {
@@ -23471,6 +23499,40 @@ export function createTypeEvaluator(
         }
         recursionCount++;
 
+        const isAssigningToObject = function (destType: Type, srcType: Type) {
+            if (isClass(destType) && ClassType.isBuiltIn(destType, 'object')) {
+                if ((isInstantiableClass(destType) && TypeBase.isInstantiable(srcType)) || isClassInstance(destType)) {
+                    if ((flags & AssignTypeFlags.Invariant) === 0) {
+                        // All types (including None, Module, Overloaded) derive from object.
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+
+        if (isAssigningToObject(destType, srcType)) {
+            return true;
+        }
+
+        if (MyPyrightExtensions.isMappedType(destType) || MyPyrightExtensions.isMappedType(srcType)) {
+            const mapSpecs = MyPyrightExtensions.deconstructMutualMappedTypes(evaluatorInterface, destType, srcType);
+            return (
+                !!mapSpecs &&
+                ((mapSpecs.destMapSpec.arg === undefined && mapSpecs.srcMapSpec.arg === undefined) ||
+                    (!!mapSpecs.destMapSpec.arg &&
+                        !!mapSpecs.srcMapSpec.arg &&
+                        assignType(
+                            mapSpecs.destMapSpec.arg,
+                            mapSpecs.srcMapSpec.arg,
+                            diag,
+                            constraints,
+                            flags,
+                            recursionCount
+                        )))
+            );
+        }
+
         // If the source and dest refer to the recursive type aliases, handle
         // the case specially to avoid recursing down both type aliases.
         if (
@@ -23597,28 +23659,6 @@ export function createTypeEvaluator(
                 return true;
             }
 
-            if (MyPyrightExtensions.isMappedType(destType) || MyPyrightExtensions.isMappedType(srcType)) {
-                const mapSpecs = MyPyrightExtensions.deconstructMutualMappedTypes(
-                    evaluatorInterface,
-                    destType,
-                    srcType
-                );
-                return (
-                    !!mapSpecs &&
-                    ((mapSpecs.destMapSpec.arg === undefined && mapSpecs.srcMapSpec.arg === undefined) ||
-                        (!!mapSpecs.destMapSpec.arg &&
-                            !!mapSpecs.srcMapSpec.arg &&
-                            assignType(
-                                mapSpecs.destMapSpec.arg,
-                                mapSpecs.srcMapSpec.arg,
-                                diag,
-                                constraints,
-                                flags,
-                                recursionCount + 1
-                            )))
-                );
-            }
-
             // If the dest is a TypeVarTuple, and the source is a tuple
             // with a single entry that is the same TypeVarTuple, it's a match.
             if (
@@ -23634,15 +23674,12 @@ export function createTypeEvaluator(
             }
 
             if ((flags & AssignTypeFlags.Contravariant) === 0 || !isTypeVar(srcType)) {
-                if (!assignTypeVar(evaluatorInterface, destType, srcType, diag, constraints, flags, recursionCount)) {
-                    return false;
+                if (
+                    assignTypeVar(evaluatorInterface, destType, srcType, diag, constraints, flags, recursionCount) &&
+                    (!isAnyOrUnknown(srcType) || (flags & AssignTypeFlags.OverloadOverlap) === 0)
+                ) {
+                    return true;
                 }
-
-                if (isAnyOrUnknown(srcType) && (flags & AssignTypeFlags.OverloadOverlap) !== 0) {
-                    return false;
-                }
-
-                return true;
             }
         }
 
@@ -24160,7 +24197,7 @@ export function createTypeEvaluator(
                         destType,
                         concreteSrcType,
                         diag?.createAddendum(),
-                        constraints ?? new ConstraintTracker(),
+                        constraints ?? new ConstraintTracker(evaluatorInterface),
                         flags,
                         recursionCount
                     )
@@ -24228,13 +24265,8 @@ export function createTypeEvaluator(
             return true;
         }
 
-        if (isClass(destType) && ClassType.isBuiltIn(destType, 'object')) {
-            if ((isInstantiableClass(destType) && TypeBase.isInstantiable(srcType)) || isClassInstance(destType)) {
-                if ((flags & AssignTypeFlags.Invariant) === 0) {
-                    // All types (including None, Module, Overloaded) derive from object.
-                    return true;
-                }
-            }
+        if (isAssigningToObject(destType, srcType)) {
+            return true;
         }
 
         // Are we trying to assign None to a protocol?
@@ -25892,7 +25924,7 @@ export function createTypeEvaluator(
             assignedType.priv.typeArgs.length <= assignedType.shared.typeParams.length &&
             !assignedType.priv.tupleTypeArgs
         ) {
-            const constraints = new ConstraintTracker();
+            const constraints = new ConstraintTracker(evaluatorInterface);
             addConstraintsForExpectedType(
                 evaluatorInterface,
                 ClassType.specialize(assignedType, /* typeArgs */ undefined),
@@ -26876,7 +26908,7 @@ export function createTypeEvaluator(
         firstParamType: ClassType | TypeVarType | undefined,
         stripFirstParam = true
     ): FunctionType | undefined {
-        const constraints = new ConstraintTracker();
+        const constraints = new ConstraintTracker(evaluatorInterface);
 
         if (firstParamType && memberType.shared.parameters.length > 0) {
             const memberTypeFirstParam = memberType.shared.parameters[0];

@@ -1398,13 +1398,13 @@ export function isMaybeDescriptorInstance(type: Type, requireSetter = false): bo
     return true;
 }
 
-export function isTupleGradualForm(type: Type) {
+export function isTupleGradualForm(type: Type, isOfType: (type: Type) => boolean = isAnyOrUnknown) {
     return (
         isClassInstance(type) &&
         isTupleClass(type) &&
         type.priv.tupleTypeArgs &&
         type.priv.tupleTypeArgs.length === 1 &&
-        isAnyOrUnknown(type.priv.tupleTypeArgs[0].type) &&
+        isOfType(type.priv.tupleTypeArgs[0].type) &&
         type.priv.tupleTypeArgs[0].isUnbounded
     );
 }

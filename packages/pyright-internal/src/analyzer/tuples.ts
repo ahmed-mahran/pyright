@@ -7,10 +7,11 @@
  * Provides special-case logic for type analysis of tuples.
  */
 
+import { fail } from '../common/debug';
 import { DiagnosticAddendum } from '../common/diagnostic';
 import { LocAddendum } from '../localization/localize';
 import { ExpressionNode, SliceNode } from '../parser/parseNodes';
-import { assignTypeVar } from './constraintSolver';
+import { assignTypeVar as doAssignTypeVar } from './constraintSolver';
 import { ConstraintTracker } from './constraintTracker';
 import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
 import { matchAccumulateSequence } from './sequenceMatching';
@@ -20,15 +21,19 @@ import {
     ClassType,
     combineTypes,
     isAnyOrUnknown,
-    isClass,
+    isAnyUnknownOrObject,
     isClassInstance,
     isInstantiableClass,
     isTypeVar,
     isTypeVarTuple,
     isUnpackedTypeVarTuple,
+    NeverType,
+    SubscriptKind,
     TupleTypeArg,
     Type,
+    TypeBase,
     TypeVarKind,
+    TypeVarSubcript,
     TypeVarType,
 } from './types';
 import {
@@ -36,6 +41,7 @@ import {
     isLiteralType,
     isTupleClass,
     isTupleGradualForm,
+    isTypeVarSame,
     isUnboundedTupleClass,
     specializeTupleClass,
 } from './typeUtils';
@@ -58,8 +64,8 @@ export function assignTupleTypeArgs(
         return typeArgs.filter((arg) => !isIndeterminate(arg));
     }
 
-    const destTypeArgs = [...(destType.priv.tupleTypeArgs ?? [])];
-    const srcTypeArgs = [...(srcType.priv.tupleTypeArgs ?? [])];
+    const destTypeArgs = combineSubscriptedTypeVars([...(destType.priv.tupleTypeArgs ?? [])]);
+    const srcTypeArgs = combineSubscriptedTypeVars([...(srcType.priv.tupleTypeArgs ?? [])]);
     const destTypeArgsBaseCase = getBaseCase(destTypeArgs);
     const srcTypeArgsBaseCase = getBaseCase(srcTypeArgs);
 
@@ -68,7 +74,7 @@ export function assignTupleTypeArgs(
             evaluator,
             destTypeArgs,
             isBaseCase ? srcTypeArgsBaseCase : srcTypeArgs,
-            constraints,
+            undefined, //isBaseCase ? undefined : constraints,
             flags,
             recursionCount
         );
@@ -134,56 +140,34 @@ export function assignTupleTypeArgs(
         }
 
         if (constraints && !constraints.isLocked()) {
-            const tupleClass = evaluator.getTupleClassType();
-            matchedTypeArgs.forEach((pair) => {
-                if (pair.destSequence.length === 1 && isTypeVarTuple(pair.destSequence[0].type)) {
-                    if (pair.srcSequence.length === 1 && isTypeVarTuple(pair.srcSequence[0].type)) {
-                        assignTypeVar(
-                            evaluator,
-                            pair.destSequence[0].type,
-                            pair.srcSequence[0].type,
-                            diag,
-                            constraints,
-                            flags,
-                            recursionCount + 1
-                        );
-                    } else {
-                        const srcArgType = createVariadicTuple(pair.srcSequence, tupleClass);
-                        if (srcArgType) {
-                            assignTypeVar(
-                                evaluator,
-                                pair.destSequence[0].type,
-                                srcArgType,
-                                diag,
-                                constraints,
-                                flags,
-                                recursionCount + 1
-                            );
-                        }
-                    }
-                } else if (pair.srcSequence.length === 1 && isTypeVarTuple(pair.srcSequence[0].type)) {
-                    const destArgType = createVariadicTuple(pair.destSequence, tupleClass);
-                    if (destArgType) {
-                        evaluator.assignType(
-                            destArgType,
-                            pair.srcSequence[0].type,
-                            diag,
-                            constraints,
-                            flags,
-                            recursionCount + 1
-                        );
-                    }
-                } else if (pair.destSequence.length === pair.srcSequence.length) {
-                    for (let i = 0; i < pair.destSequence.length; i++) {
-                        const destArg = pair.destSequence[i].type;
-                        const srcArg = pair.srcSequence[i].type;
+            function isSingleTypeVarTuple(seq: TupleTypeArg[]) {
+                return seq.length === 1 && isTypeVarTuple(seq[0].type);
+            }
 
-                        if (isTypeVar(destArg)) {
-                            assignTypeVar(evaluator, destArg, srcArg, diag, constraints, flags, recursionCount + 1);
-                        } else if (hasTypeVar(destArg) || hasTypeVar(srcArg)) {
-                            evaluator.assignType(destArg, srcArg, diag, constraints, flags, recursionCount + 1);
-                        }
-                    }
+            const assignTypeVar = function (dest: TypeVarType, src: Type) {
+                return doAssignTypeVar(evaluator, dest, src, diag, constraints, flags, recursionCount + 1);
+            };
+            const assignType = function (dest: Type, src: Type) {
+                return evaluator.assignType(dest, src, diag, constraints, flags, recursionCount + 1);
+            };
+            const assignTypeIfDestIsTypeVar = function (dest: Type, src: Type): boolean | undefined {
+                if (isTypeVar(dest)) {
+                    return assignTypeVar(dest, src);
+                } else if (hasTypeVar(dest) /* || hasTypeVar(src)*/) {
+                    return assignType(dest, src);
+                }
+                return undefined;
+            };
+            allocateSourceTypeVarTuples(matchedTypeArgs).forEach(({ destSequence, srcSequence }) => {
+                if (isSingleTypeVarTuple(destSequence)) {
+                    assignTypeVar(
+                        destSequence[0].type as TypeVarType,
+                        isSingleTypeVarTuple(srcSequence)
+                            ? srcSequence[0].type
+                            : createVariadicTuple(evaluator, srcSequence)
+                    );
+                } else if (destSequence.length === srcSequence.length) {
+                    destSequence.forEach((destArg, i) => assignTypeIfDestIsTypeVar(destArg.type, srcSequence[i].type));
                 }
             });
         }
@@ -271,7 +255,8 @@ export function assignTupleTypeArgs(
     return false;
 }
 
-function createVariadicTuple(typeArgs: TupleTypeArg[], tupleClass: ClassType | undefined) {
+function createVariadicTuple(evaluator: TypeEvaluator, typeArgs: TupleTypeArg[]) {
+    const tupleClass = evaluator.getTupleClassType();
     if (tupleClass && isInstantiableClass(tupleClass)) {
         const tuple = ClassType.cloneAsInstance(
             specializeTupleClass(
@@ -279,7 +264,7 @@ function createVariadicTuple(typeArgs: TupleTypeArg[], tupleClass: ClassType | u
                 typeArgs.map((typeArg) => {
                     return {
                         type: typeArg.type,
-                        isUnbounded: typeArg.isUnbounded,
+                        isUnbounded: !isUnpackedTypeVarTuple(typeArg.type) && typeArg.isUnbounded,
                         isOptional: typeArg.isOptional,
                     };
                 }),
@@ -290,7 +275,8 @@ function createVariadicTuple(typeArgs: TupleTypeArg[], tupleClass: ClassType | u
         tuple.priv.isEmptyContainer = typeArgs.length === 0;
         return tuple;
     }
-    return undefined;
+
+    fail("Couldn't create a tuple");
 }
 
 function isIndeterminate(type: TupleTypeArg | undefined): boolean {
@@ -332,11 +318,8 @@ export function matchTupleTypeArgs(
         if (res !== undefined) {
             return res;
         } else if (destType !== undefined && srcType !== undefined) {
-            function isAnyUnknownOrObject(type: Type) {
-                return (isClass(type) && ClassType.isBuiltIn(type, 'object')) || isAnyOrUnknown(type);
-            }
             function isUniversal(type: Type): boolean {
-                if (isAnyUnknownOrObject(type)) {
+                if (isAnyUnknownOrObject(type) || isTupleGradualForm(type, isAnyUnknownOrObject)) {
                     return true;
                 }
 
@@ -347,7 +330,7 @@ export function matchTupleTypeArgs(
                         (MyPyrightExtensions.isMappedType(type)
                             ? !type.shared.mappedBoundType || isUniversal(type.shared.mappedBoundType)
                             : !type.shared.boundType || isUniversal(type.shared.boundType)) &&
-                        type.shared.constraints.find((c) => !isUniversal(c)) === undefined
+                        type.shared.constraints.every(isUniversal)
                     );
                 }
 
@@ -365,12 +348,13 @@ export function matchTupleTypeArgs(
                     destType.type,
                     srcType.type,
                     /* diag */ undefined,
-                    // matching repeated VS non-repeated needs to build up new constraints,
-                    // as the repeated element is collecting more non-repeated elements
-                    (isIndeterminate(destType) && isIndeterminate(srcType)) ||
-                        !(isIndeterminate(destType) || isIndeterminate(srcType))
-                        ? constraints
-                        : new ConstraintTracker(),
+                    constraints,
+                    // // matching repeated VS non-repeated needs to build up new constraints,
+                    // // as the repeated element is collecting more non-repeated elements
+                    // (isIndeterminate(destType) && isIndeterminate(srcType)) ||
+                    //     !(isIndeterminate(destType) || isIndeterminate(srcType))
+                    //     ? constraints
+                    //     : undefined, // new ConstraintTracker(),
                     flags,
                     recursionCount + 1
                 );
@@ -396,6 +380,7 @@ export function matchTupleTypeArgs(
         matches,
         toStr,
         toStr,
+        { type: NeverType.createNever(), isUnbounded: false },
         recursionCount
     );
     if (!wasLocked) {
@@ -403,6 +388,209 @@ export function matchTupleTypeArgs(
     }
 
     return matchedTypeArgs;
+}
+
+// A source type var tuple can match a type var tuple and/or zero or more singular types.
+// E.g., consider the matching pair [V, *Vs] <==> [*Ds, D]:
+// - *Vs and *Ds could match zero types and hence effectively V matches D but this is not a generic assignment as
+//   we have completely ignored *Vs.
+// - *Vs and *Ds each could match one type and hence effectively V matches *Ds and *Vs matches D but how is it possible
+//   to assign *Ds to V, so this is not a valid assignment.
+// - V matches the first type of *Ds: Ds[0],  and *Vs matches the rest of *Ds and D: *Ds[1:], V.
+//   This way we have got a valid generic assignment of V and *Vs
+// This function traverses matched sequence pairs allocating source type var tuples propely to
+// matched destination types. If a singular dest type matches a type var tuple, it is assigned an element
+// of that type var tuple. If a dest type var tuple matches a type var tuple, it is assigned what is left
+// of that type var tuple. The function keeps track of how many times a source type var tuple is being
+// assigned to singular dest types and reflects that subscripted source type var tuple.
+function allocateSourceTypeVarTuples(matchedTypeArgs: { destSequence: TupleTypeArg[]; srcSequence: TupleTypeArg[] }[]) {
+    class TypeVarTupleIndexTracker {
+        counter: number = 0;
+        sliceFromStart: boolean = true;
+        constructor(typeVarTuple: TypeVarType) {}
+
+        // draws and allocates an index from this type var tuple when it matches a singular type
+        allocateIndex() {
+            return this.counter++;
+        }
+
+        // Allocates the rest of the type var tuple when it matches another type var tuple.
+        // There will be only one allocated slice as a type var tuple cannot match more than
+        // one type var tuple.
+        allocateSlice() {
+            // If we have allocated indicies from this type var tuple, then this is a slice
+            // after the allocated indicies. Otherwise, we might be allocating indicies from
+            // end afterwards.
+            this.sliceFromStart = this.counter > 0;
+        }
+
+        // Returns the corresponding subscript given the allocated index. When no index
+        // is provided, it is assumed as an allocated slice and hence it returns the
+        // subscript corresponding to the allocated slice. There will be only one allocated
+        // slice as a type var tuple cannot match more than one type var tuple.
+        getSubscript(index?: number) {
+            return index !== undefined
+                ? {
+                      subscript: this.sliceFromStart ? index : index - this.counter,
+                      subscriptKind: SubscriptKind.Index,
+                  }
+                : this.counter === 0
+                ? undefined // no indicies allocated, return the whole type var tuple
+                : this.sliceFromStart
+                ? { subscript: this.counter, subscriptKind: SubscriptKind.StartSlice }
+                : { subscript: -this.counter, subscriptKind: SubscriptKind.EndSlice };
+        }
+    }
+
+    const srcTypeVarTupleTrackers = new Map<string, TypeVarTupleIndexTracker>();
+
+    return (
+        matchedTypeArgs
+            // First pass, allocate indicies and slices from source type var tuples
+            .map(({ destSequence, srcSequence }) => {
+                const mappedSrcSequence = srcSequence.map((srcArg, i) => {
+                    if (isTypeVarTuple(srcArg.type)) {
+                        let tracker = srcTypeVarTupleTrackers.get(srcArg.type.shared.name);
+                        if (!tracker) {
+                            tracker = new TypeVarTupleIndexTracker(srcArg.type);
+                            srcTypeVarTupleTrackers.set(srcArg.type.shared.name, tracker);
+                        }
+                        if (
+                            destSequence.length === 0 ||
+                            isTypeVarTuple(destSequence[destSequence.length === 1 ? 0 : i].type)
+                        ) {
+                            tracker.allocateSlice();
+                            return { srcArg, typeVarTuple: srcArg.type };
+                        } else {
+                            return { srcArg, typeVarTuple: srcArg.type, index: tracker.allocateIndex() };
+                        }
+                    } else {
+                        return { srcArg };
+                    }
+                });
+                return { destSequence, srcSequence: mappedSrcSequence };
+            })
+            // Second pass, convert allocated indicies and slices to concrete subscripted
+            // type var tuples. The reason we need a second pass is that, if a source
+            // type var tuple matches a type var tuple first, we don't know in advance
+            // whether or not we should allocate a slice, and if so we don't know what slice
+            // to allocate. This is because we don't know how many singular types it will match later.
+            .map(({ destSequence, srcSequence }) => {
+                const mappedSrcSequence = srcSequence.map((srcArg) => {
+                    if (srcArg.typeVarTuple) {
+                        const tracker =
+                            srcTypeVarTupleTrackers.get(srcArg.typeVarTuple.shared.name) ??
+                            new TypeVarTupleIndexTracker(srcArg.typeVarTuple);
+                        const subscript = tracker.getSubscript(srcArg.index);
+                        const indexedTypeVarTuple = subscript
+                            ? TypeVarType.cloneAsSubscripted(
+                                  srcArg.typeVarTuple,
+                                  subscript.subscript,
+                                  subscript.subscriptKind
+                              )
+                            : TypeBase.cloneType(srcArg.typeVarTuple);
+                        if (isTypeVarTuple(indexedTypeVarTuple)) {
+                            indexedTypeVarTuple.priv.isUnpacked = true;
+                        }
+                        return {
+                            ...srcArg.srcArg,
+                            type: indexedTypeVarTuple,
+                        };
+                    } else {
+                        return srcArg.srcArg;
+                    }
+                });
+                return { destSequence, srcSequence: mappedSrcSequence };
+            })
+    );
+}
+
+// Subscripted type var tuples are generated as a result of matching type var tuples
+// to multiple singular types. We use this utility function to combine a contiguous
+// sequence of subscripted type var tuples back into one type var tuple, the original
+// type var tuple. This is to avoid confusion and further ambiguity when matching
+// against subscripted type var tuples. If subscripted type var tuples becomes a thing
+// in python specs, we need to distinguish between synthesized and normal cases.
+function combineSubscriptedTypeVars(args: TupleTypeArg[]) {
+    if (args.length === 0) {
+        return args;
+    }
+
+    const isSubscriptOfTheSameTypeVar = (
+        confirmedSubscript: TypeVarSubcript,
+        subjectSubscript: TypeVarSubcript | undefined
+    ): subjectSubscript is TypeVarSubcript =>
+        !!subjectSubscript && isTypeVarSame(confirmedSubscript.base, subjectSubscript.base);
+
+    const areAdjacent = (prevSubscript: TypeVarSubcript, currentSubscript: TypeVarSubcript): boolean =>
+        (currentSubscript.kind === SubscriptKind.Index &&
+            prevSubscript.kind === SubscriptKind.Index &&
+            currentSubscript.index === prevSubscript.index + 1) ||
+        (currentSubscript.kind === SubscriptKind.Index &&
+            prevSubscript.kind === SubscriptKind.EndSlice &&
+            currentSubscript.index === prevSubscript.index) ||
+        (currentSubscript.kind === SubscriptKind.StartSlice &&
+            prevSubscript.kind === SubscriptKind.Index &&
+            currentSubscript.index === prevSubscript.index + 1);
+
+    const isValidEnd = (subscript: TypeVarSubcript): boolean =>
+        (subscript.kind === SubscriptKind.Index && subscript.index < 0) || subscript.kind === SubscriptKind.StartSlice;
+
+    const isValidStart = (subscript: TypeVarSubcript): boolean =>
+        (subscript.kind === SubscriptKind.Index && subscript.index === 0) || subscript.kind === SubscriptKind.EndSlice;
+
+    let prevSubscript: TypeVarSubcript | undefined;
+    let startIndex: number | undefined = undefined;
+    let isUnbounded: boolean = false;
+    let isOptional: boolean | undefined = undefined;
+    let i = 0;
+    while (i <= args.length) {
+        const currentArg: TupleTypeArg | undefined = i < args.length ? args[i] : undefined;
+        const currentSubscript =
+            currentArg?.type && isTypeVar(currentArg.type) ? currentArg.type.shared.subscript : undefined;
+
+        if (!!prevSubscript && isSubscriptOfTheSameTypeVar(prevSubscript, currentSubscript)) {
+            // continue or break
+            if (areAdjacent(prevSubscript, currentSubscript)) {
+                prevSubscript = currentSubscript;
+            } else {
+                startIndex = undefined;
+                prevSubscript = undefined;
+            }
+            if (!!currentArg && isTypeVarTuple(currentSubscript.base)) {
+                isUnbounded = currentArg.isUnbounded;
+                isOptional = currentArg.isOptional;
+            }
+        } else if (
+            startIndex !== undefined &&
+            !!prevSubscript &&
+            !isSubscriptOfTheSameTypeVar(prevSubscript, currentSubscript)
+        ) {
+            // end
+            if (isValidEnd(prevSubscript)) {
+                const baseArg = {
+                    type: prevSubscript.base,
+                    isUnbounded,
+                    isOptional,
+                };
+                args.splice(startIndex, i - startIndex, baseArg);
+            }
+            startIndex = undefined;
+            prevSubscript = undefined;
+        } else if (!!currentSubscript && !isSubscriptOfTheSameTypeVar(currentSubscript, prevSubscript)) {
+            // start
+            if (isValidStart(currentSubscript)) {
+                startIndex = i;
+                prevSubscript = currentSubscript;
+            }
+            if (!!currentArg && isTypeVarTuple(currentSubscript.base)) {
+                isUnbounded = currentArg.isUnbounded;
+                isOptional = currentArg.isOptional;
+            }
+        }
+        i++;
+    }
+    return args;
 }
 
 // Adjusts the source and/or dest type arguments list to attempt to match

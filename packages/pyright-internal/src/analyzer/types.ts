@@ -2677,6 +2677,18 @@ export enum TypeVarKind {
     ParamSpec,
 }
 
+export enum SubscriptKind {
+    Index,
+    StartSlice,
+    EndSlice,
+}
+
+export interface TypeVarSubcript {
+    base: TypeVarTupleType;
+    kind: SubscriptKind;
+    index: number;
+}
+
 export interface TypeVarDetailsShared {
     kind: TypeVarKind;
     name: string;
@@ -2687,6 +2699,8 @@ export interface TypeVarDetailsShared {
     defaultType: Type;
 
     declaredVariance: Variance;
+
+    subscript?: TypeVarSubcript;
 
     // Internally created (e.g. for pseudo-generic classes)
     isSynthesized: boolean;
@@ -2837,6 +2851,29 @@ export namespace TypeVarType {
             newInstance.priv.nameWithScope = makeNameWithScope(name, newInstance.priv.scopeId);
         }
 
+        return newInstance;
+    }
+
+    export function cloneAsSubscripted(type: TypeVarTupleType, index: number, kind: SubscriptKind): TypeVarType {
+        let subscriptString: string = '';
+        switch (kind) {
+            case SubscriptKind.Index:
+                subscriptString = `[${index}]`;
+                break;
+
+            case SubscriptKind.StartSlice:
+                subscriptString = `[${index}:]`;
+                break;
+
+            case SubscriptKind.EndSlice:
+                subscriptString = `[:${index}]`;
+                break;
+        }
+        const newInstance = cloneForNewName(type, `${type.shared.name}${subscriptString}`);
+        if (kind === SubscriptKind.Index) {
+            newInstance.shared.kind = TypeVarKind.TypeVar;
+        }
+        newInstance.shared.subscript = { base: type, kind, index };
         return newInstance;
     }
 
@@ -3092,6 +3129,10 @@ export function isAnyOrUnknown(type: Type): type is AnyType | UnknownType {
     }
 
     return false;
+}
+
+export function isAnyUnknownOrObject(type: Type): type is ClassType | AnyType | UnknownType {
+    return (isClass(type) && ClassType.isBuiltIn(type, 'object')) || isAnyOrUnknown(type);
 }
 
 export function isUnbound(type: Type): type is UnboundType {
@@ -3471,6 +3512,26 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
                 }
             } else {
                 if (boundType2) {
+                    return false;
+                }
+            }
+
+            const mappedBoundType1 = type1.shared.mappedBoundType;
+            const mappedBoundType2 = type2TypeVar.shared.mappedBoundType;
+            if (mappedBoundType1) {
+                if (
+                    !mappedBoundType2 ||
+                    !isTypeSame(
+                        mappedBoundType1,
+                        mappedBoundType2,
+                        { ...options, ignoreTypeFlags: false },
+                        recursionCount
+                    )
+                ) {
+                    return false;
+                }
+            } else {
+                if (mappedBoundType2) {
                     return false;
                 }
             }
