@@ -407,7 +407,7 @@ function validateNewMethod(
     let argumentErrors = false;
     const overloadsUsedForCall: FunctionType[] = [];
 
-    const constraints = new ConstraintTracker();
+    const constraints = new ConstraintTracker(evaluator);
 
     const callResult = evaluator.useSpeculativeMode(useSpeculativeModeForArgs ? errorNode : undefined, () => {
         return evaluator.validateCallArgs(
@@ -477,7 +477,7 @@ function validateInitMethod(
     let argumentErrors = false;
     const overloadsUsedForCall: FunctionType[] = [];
 
-    const constraints = new ConstraintTracker();
+    const constraints = new ConstraintTracker(evaluator);
     if (type.priv.typeArgs) {
         addConstraintsForExpectedType(evaluator, type, type, constraints, /* liveTypeVarScopes */ undefined);
     }
@@ -938,7 +938,7 @@ function createFunctionFromInitMethod(
             // If this is a generic type, self-specialize the class (i.e. fill in
             // its own type parameters as type arguments).
             if (objectType.shared.typeParams.length > 0 && !objectType.priv.typeArgs) {
-                const constraints = new ConstraintTracker();
+                const constraints = new ConstraintTracker(evaluator);
 
                 // If a TypeVar is not used in any of the parameter types, it should take
                 // on its default value (typically Unknown) in the resulting specialized type.

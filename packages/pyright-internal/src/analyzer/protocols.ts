@@ -774,7 +774,7 @@ function createProtocolConstraints(
     destType: ClassType,
     constraints: ConstraintTracker | undefined
 ): ConstraintTracker {
-    const protocolConstraints = new ConstraintTracker();
+    const protocolConstraints = new ConstraintTracker(evaluator);
 
     destType.shared.typeParams.forEach((typeParam, index) => {
         const entry = constraints?.getMainConstraintSet().getTypeVar(typeParam);

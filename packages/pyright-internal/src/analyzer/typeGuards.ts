@@ -1475,7 +1475,7 @@ function narrowTypeForIsInstanceInternal(
                                         !filterType.priv.isTypeArgExplicit &&
                                         !ClassType.isSameGenericClass(concreteVarType, filterType)
                                     ) {
-                                        const constraints = new ConstraintTracker();
+                                        const constraints = new ConstraintTracker(evaluator);
                                         const unspecializedFilterType = ClassType.specialize(
                                             filterType,
                                             /* typeArg */ undefined

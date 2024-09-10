@@ -221,7 +221,7 @@ function applyPartialTransformToFunction(
     // Verify the types of the provided arguments.
     let argumentErrors = false;
     let reportedPositionalError = false;
-    const constraints = new ConstraintTracker();
+    const constraints = new ConstraintTracker(evaluator);
 
     const remainingArgsList = argList.slice(1);
     remainingArgsList.forEach((arg, argIndex) => {

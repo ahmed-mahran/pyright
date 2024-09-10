@@ -1264,7 +1264,7 @@ export function assignToTypedDict(
     let genericClassType = classType;
 
     if (classType.shared.typeParams.length > 0) {
-        constraints = new ConstraintTracker();
+        constraints = new ConstraintTracker(evaluator);
 
         // Create a generic (nonspecialized version) of the class.
         if (classType.priv.typeArgs) {

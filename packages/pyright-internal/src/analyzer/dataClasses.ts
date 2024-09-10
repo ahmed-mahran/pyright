@@ -829,7 +829,7 @@ function getConverterInputType(
         const diagAddendum = new DiagnosticAddendum();
 
         doForEachSignature(converterType, (signature) => {
-            const returnConstraints = new ConstraintTracker();
+            const returnConstraints = new ConstraintTracker(evaluator);
 
             if (
                 evaluator.assignType(
@@ -842,7 +842,7 @@ function getConverterInputType(
                 signature = evaluator.solveAndApplyConstraints(signature, returnConstraints) as FunctionType;
             }
 
-            const inputConstraints = new ConstraintTracker();
+            const inputConstraints = new ConstraintTracker(evaluator);
 
             if (evaluator.assignType(targetFunction, signature, diagAddendum, inputConstraints)) {
                 const overloadSolution = evaluator.solveAndApplyConstraints(typeVar, inputConstraints, {

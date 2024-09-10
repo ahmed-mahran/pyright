@@ -943,7 +943,7 @@ function narrowTypeBasedOnClassPattern(
                                     ClassType.isSpecialBuiltIn(unexpandedSubtype) ||
                                     unexpandedSubtype.shared.typeParams.length > 0
                                 ) {
-                                    const constraints = new ConstraintTracker();
+                                    const constraints = new ConstraintTracker(evaluator);
                                     const unspecializedMatchType = ClassType.specialize(
                                         unexpandedSubtype,
                                         /* typeArgs */ undefined
@@ -1260,7 +1260,7 @@ function getMappingPatternInfo(evaluator: TypeEvaluator, type: Type, node: Patte
             const mappingObject = ClassType.cloneAsInstance(mappingType);
 
             // Is it a subtype of Mapping?
-            const constraints = new ConstraintTracker();
+            const constraints = new ConstraintTracker(evaluator);
             if (evaluator.assignType(mappingObject, subtype, /* diag */ undefined, constraints)) {
                 const specializedMapping = evaluator.solveAndApplyConstraints(mappingObject, constraints) as ClassType;
 
@@ -1516,7 +1516,7 @@ function getSequencePatternInfo(
                 const sequenceObject = ClassType.cloneAsInstance(sequenceType);
 
                 // Is it a subtype of Sequence?
-                const constraints = new ConstraintTracker();
+                const constraints = new ConstraintTracker(evaluator);
                 if (evaluator.assignType(sequenceObject, subtype, /* diag */ undefined, constraints)) {
                     const specializedSequence = evaluator.solveAndApplyConstraints(
                         sequenceObject,
@@ -1536,7 +1536,7 @@ function getSequencePatternInfo(
                 }
 
                 // If it wasn't a subtype of Sequence, see if it's a supertype.
-                const sequenceConstraints = new ConstraintTracker();
+                const sequenceConstraints = new ConstraintTracker(evaluator);
                 if (
                     addConstraintsForExpectedType(
                         evaluator,

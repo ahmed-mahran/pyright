@@ -976,7 +976,7 @@ export class Checker extends ParseTreeWalker {
                         const uniqueTypeVars = getTypeVarArgsRecursive(declaredReturnType);
 
                         if (uniqueTypeVars && uniqueTypeVars.some((typeVar) => TypeVarType.hasConstraints(typeVar))) {
-                            const constraints = new ConstraintTracker();
+                            const constraints = new ConstraintTracker(this._evaluator);
 
                             for (const typeVar of uniqueTypeVars) {
                                 if (TypeVarType.hasConstraints(typeVar)) {
@@ -2791,7 +2791,7 @@ export class Checker extends ParseTreeWalker {
         implementation: FunctionType,
         diag: DiagnosticAddendum | undefined
     ): boolean {
-        const constraints = new ConstraintTracker();
+        const constraints = new ConstraintTracker(this._evaluator);
 
         let implBound = implementation;
         let overloadBound = overload;
