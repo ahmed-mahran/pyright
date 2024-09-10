@@ -4,22 +4,25 @@ import { ExpressionNode } from '../parser/parseNodes';
 import { ConstraintTracker } from './constraintTracker';
 import { EvalFlags, TypeEvaluator, TypeResult } from './typeEvaluatorTypes';
 import {
+    AnyType,
     ClassType,
     combineTypes,
+    isAnyUnknownOrObject,
     isClass,
-    isInstantiableClass,
     isTypeSame,
     isTypeVar,
     isTypeVarTuple,
+    isUnion,
     isUnknown,
     TupleTypeArg,
     Type,
     TypeBase,
     TypeFlags,
     TypeVarType,
+    UnionableType,
     UnknownType,
 } from './types';
-import { InferenceContext, isTupleClass, mapSubtypes, specializeTupleClass } from './typeUtils';
+import { InferenceContext, isNoneInstance, isTupleClass, mapSubtypes, specializeTupleClass } from './typeUtils';
 
 export namespace MyPyrightExtensions {
     const enum TupleCreationFlags {
@@ -38,13 +41,15 @@ export namespace MyPyrightExtensions {
         flags = TupleCreationFlags.None
     ) {
         const tupleClass = evaluator.getTupleClassType();
-        if (tupleClass && isInstantiableClass(tupleClass)) {
-            const instantiableClass = tupleClass;
+        if (tupleClass) {
             const isTypeArgsExplicit: boolean | undefined =
                 (flags & TupleCreationFlags.TypeArgsExplicit) !== 0 ? true : undefined;
             const isUnpacked: boolean | undefined = (flags & TupleCreationFlags.Unpacked) !== 0 ? true : undefined;
             const isMap: boolean | undefined = (flags & TupleCreationFlags.Map) !== 0 ? true : undefined;
-            const tuple = specializeTupleClass(instantiableClass, tupleTypeArgs, isTypeArgsExplicit, isUnpacked);
+            const tuple = ClassType.cloneAsInstance(
+                specializeTupleClass(tupleClass, tupleTypeArgs, isTypeArgsExplicit, isUnpacked),
+                /* includeSubclasses */ false
+            );
             tuple.priv.isMapTuple = isMap;
             return tuple;
         }
@@ -133,21 +138,17 @@ export namespace MyPyrightExtensions {
                         setFlagMapped(
                             createTupleTypeInstance(
                                 evaluator,
-                                [{ type: convertToMappedType(map, mapArg), isUnbounded: false }],
+                                [{ type: convertToMappedType(evaluator, map, mapArg), isUnbounded: false }],
                                 TupleCreationFlags.Map
                             )
                         )
                     );
-                    // return convertToMappedType(map, mapArg);
                 } else if (isClass(mapArg) && isTupleClass(mapArg)) {
-                    // mapArg.priv.isMapTuple = true;
-                    // mapArg.priv.isUnpacked &&= false;
-                    // return convertToMappedType(map, mapArg);
                     return setProperFlags(
                         setFlagMapped(
                             createTupleTypeInstance(
                                 evaluator,
-                                (convertToMappedType(map, mapArg) as ClassType).priv.tupleTypeArgs ?? [],
+                                (convertToMappedType(evaluator, map, mapArg) as ClassType).priv.tupleTypeArgs ?? [],
                                 TupleCreationFlags.Map
                             )
                         )
@@ -160,23 +161,49 @@ export namespace MyPyrightExtensions {
         return type;
     }
 
-    export function convertToMappedType(map: MapType, type?: Type): Type {
+    export function createBoundForTypeVar(
+        evaluator: TypeEvaluator,
+        typeVar: TypeVarType,
+        boundType: Type | undefined
+    ): Type | undefined {
+        if (!!boundType && isTypeVarTuple(typeVar)) {
+            const isIterTupleClass = isClass(boundType) && isTupleClass(boundType) && isIterTuple(boundType);
+            if (!isTypeVarTuple(boundType) && !isIterTupleClass) {
+                const tuple = createTupleTypeInstance(
+                    evaluator,
+                    [{ type: boundType, isUnbounded: true }],
+                    TupleCreationFlags.Unpacked
+                );
+                if (isMappedType(boundType)) {
+                    setFlagMapped(tuple);
+                }
+                return tuple;
+            } else if (isIterTupleClass && !boundType.priv.isUnpacked) {
+                return ClassType.cloneForUnpacked(boundType, /* isUnpacked */ true);
+            } else if (isTypeVarTuple(boundType) && !boundType.priv.isUnpacked) {
+                return TypeVarType.cloneForUnpacked(boundType, boundType.priv.isInUnion);
+            }
+        }
+        return boundType;
+    }
+
+    export function convertToMappedType(evaluator: TypeEvaluator, map: MapType, type?: Type): Type {
         //TODO if type is Union, return map of Union or Union of maps?
         // Now we return map of Union because it is simplier and doesn't
         // seem to be wrong.
 
         if (type && isTypeVarTuple(type)) {
-            type.shared.mappedBoundType = convertToMappedType(
+            const mappedBoundType = convertToMappedType(
+                evaluator,
                 map,
-                // for nesting; the base case is to start by boundType when
-                // mappedBoundType is firstly undefined then go for mappedBoundType
-                type.shared.mappedBoundType ?? type.shared.boundType
+                isMappedType(type) ? type.shared.mappedBoundType : type.shared.boundType
             );
+            type.shared.mappedBoundType = createBoundForTypeVar(evaluator, type, mappedBoundType);
             return setFlagMapped(TypeBase.cloneType(type));
         } else if (type && isClass(type) && isTupleClass(type) && isIterTuple(type)) {
             const clone = TypeBase.cloneType(type);
             clone.priv.tupleTypeArgs = type.priv.tupleTypeArgs?.map((arg) => ({
-                type: convertToMappedType(map, arg.type),
+                type: convertToMappedType(evaluator, map, arg.type),
                 isUnbounded: arg.isUnbounded,
                 isOptional: arg.isOptional,
             }));
@@ -201,6 +228,10 @@ export namespace MyPyrightExtensions {
 
         specialize(arg?: Type): Type {
             return MapType.specialize(this, arg);
+        }
+
+        linearize(): Type[] {
+            return MapType.linearize(this);
         }
     }
 
@@ -230,6 +261,22 @@ export namespace MyPyrightExtensions {
             return _from(type);
         }
 
+        export function fromLineage(lineage: Type[]): MapType | undefined {
+            let map: MapType | undefined = undefined;
+            for (let i = lineage.length - 1; i >= 0; i--) {
+                map = new MapType(lineage[i], map);
+            }
+            return map;
+        }
+
+        export function isMapTypeSame(map1: MapType, map2: MapType): boolean {
+            return (
+                isTypeSame(map1.outer, map2.outer) &&
+                ((!map1.inner && !map2.inner) ||
+                    (!!map1.inner && !!map2.inner && isMapTypeSame(map1.inner, map2.inner)))
+            );
+        }
+
         export function mapToType(map: MapType): Type {
             return map.inner ? specializeMapType(map.outer, mapToType(map.inner)) : map.outer;
         }
@@ -249,6 +296,41 @@ export namespace MyPyrightExtensions {
                 inners.length > 0 ? combine(inners) : undefined
             );
         }
+
+        export function linearize(map: MapType): Type[] {
+            const maps: Type[] = [];
+            const _linearize = function (map: MapType): void {
+                maps.push(map.outer);
+                if (map.inner) {
+                    _linearize(map.inner);
+                }
+            };
+            _linearize(map);
+            return maps;
+        }
+
+        /**
+         * Removes suffixMap from map keeping only the outer most map. If map and
+         * suffixMap are the same, returns undefined. If suffixMap is not a suffix
+         * of map, returns map.
+         */
+        export function pruneSuffix(map: MapType, suffixMap: MapType) {
+            const mapLineage = map.linearize();
+            const suffixLineage = suffixMap.linearize();
+            let i = mapLineage.length - 1;
+            let j = suffixLineage.length - 1;
+            while (i >= 0 && j >= 0 && isTypeSame(mapLineage[i], suffixLineage[j])) {
+                i--;
+                j--;
+            }
+            if (i >= 0 && j < 0) {
+                return MapType.fromLineage(mapLineage.slice(0, i + 1));
+            } else if (i < 0 && j < 0) {
+                return undefined;
+            } else {
+                return map;
+            }
+        }
     }
 
     export interface MapSpec {
@@ -264,57 +346,64 @@ export namespace MyPyrightExtensions {
     export function deconstructMappedType1(evaluator: TypeEvaluator, type: Type): MapSpec {
         assert(isMappedType(type), `Type ${evaluator.printType(type)} is not a mapped type!`);
 
-        function _deconstructMappedType(type: Type): InternalMapSpec {
-            //TODO do union of maps?
+        function _deconstructMappedSubtypes<T, R extends Type>(
+            ts: T[] | undefined,
+            getMappedType: (mappedT: T) => Type,
+            getUnmappedT: (unmapped: Type | undefined, mappedT: T) => T | undefined,
+            combineArgs: (args: T[]) => R
+        ) {
+            const deconstructions =
+                ts?.map((t) => {
+                    const { map, arg } = _deconstructMappedType(getMappedType(t));
+                    return { map, arg, mappedT: t };
+                }) ?? [];
+            const concreteArgs = deconstructions.map((d) => getUnmappedT(d.arg, d.mappedT)).filter((a) => !!a) as T[];
+            const hasErrors =
+                // at least one map is empty
+                deconstructions.some((d) => !d.map) ||
+                // at least one arg is empty but not all
+                (deconstructions.some((d) => !d.arg) && !deconstructions.every((d) => !d.arg));
+            if (hasErrors) {
+                return {};
+            }
+            const concreteMaps = deconstructions.map((d) => d.map).filter((m) => !!m);
+            const map = MapType.combine(concreteMaps);
+            const arg = unsetFlagMapped(combineArgs(concreteArgs));
+            return { map, arg };
+        }
 
+        function _deconstructMappedType(type: Type): InternalMapSpec {
             if (isMappedType(type)) {
                 if (TypeBase.isInstantiable(type) && !TypeBase.isInstance(type)) {
                     const { map, arg } = _deconstructMappedType(TypeBase.cloneTypeAsInstance(type, /* cache */ false));
                     return { map: new MapType(getTypeClassType(evaluator), map), arg };
                 } else if (isClass(type) && isEffectivelyGenericClassType(type)) {
                     if (isTupleClass(type) && isIterTuple(type)) {
-                        const deconstructions =
-                            type.priv.tupleTypeArgs?.map((a) => {
-                                const { map, arg } = _deconstructMappedType(a.type);
-                                return {
-                                    map,
-                                    arg,
-                                    isUnbounded: a.isUnbounded,
-                                    isOptional: a.isOptional,
-                                };
-                            }) ?? [];
-                        const hasErrors =
-                            // at least one map is empty
-                            deconstructions.some((d) => !d.map) ||
-                            // at least one arg is empty but not all
-                            (deconstructions.some((d) => !d.arg) && !deconstructions.every((d) => !d.arg));
-                        if (hasErrors) {
-                            return {};
-                        }
-                        const concreteMaps = deconstructions.map((d) => d.map).filter((m) => !!m);
-                        const map = MapType.combine(concreteMaps);
-                        const concreteArgs = deconstructions
-                            .map((d) =>
-                                d.arg
+                        return _deconstructMappedSubtypes(
+                            type.priv.tupleTypeArgs,
+                            (a) => a.type,
+                            (arg, a) =>
+                                !!arg || a.isUnbounded
                                     ? {
-                                          type: d.arg,
-                                          isUnbounded: d.isUnbounded,
-                                          isOptional: d.isOptional,
+                                          type: arg ?? newUnknownType(),
+                                          isUnbounded: a.isUnbounded,
+                                          isOptional: a.isOptional,
                                       }
-                                    : undefined
-                            )
-                            .filter((a) => !!a);
-                        const arg = unsetFlagMapped(
-                            ClassType.cloneAsInstance(specializeTupleClass(type, concreteArgs))
+                                    : undefined,
+                            (args) => {
+                                const arg = ClassType.cloneAsInstance(specializeTupleClass(type, args));
+                                arg.priv.isEmptyContainer = args.length === 0;
+                                return arg;
+                            }
                         );
-                        arg.priv.isEmptyContainer = deconstructions.length === 0;
-                        return { map, arg };
                     }
 
                     const firstArg = isTupleClass(type)
                         ? firstOptional(type.priv.tupleTypeArgs)?.type
                         : firstOptional(type.priv.typeArgs);
-                    const internalMapSpec = firstArg ? _deconstructMappedType(TypeBase.cloneType(firstArg)) : undefined;
+                    const internalMapSpec = firstArg
+                        ? _deconstructMappedType(TypeBase.cloneType(firstArg))
+                        : { arg: AnyType.create() };
                     return {
                         map: new MapType(specializeMapType(type), internalMapSpec?.map),
                         arg: internalMapSpec?.arg,
@@ -325,6 +414,13 @@ export namespace MyPyrightExtensions {
                     const { map, arg } = _deconstructMappedType(type.shared.mappedBoundType);
                     clone.shared.boundType = arg;
                     return { map, arg: clone };
+                } else if (isUnion(type)) {
+                    return _deconstructMappedSubtypes(
+                        type.priv.subtypes,
+                        (t) => t,
+                        (arg, t) => arg as UnionableType | undefined,
+                        combineTypes
+                    );
                 } else {
                     return {
                         map: new MapType(specializeMapType(type)),
@@ -348,9 +444,51 @@ export namespace MyPyrightExtensions {
         baseMap: MapType,
         isTypeDest: boolean
     ): MapSpec | undefined {
-        function _deconstructMappedType2(type: Type, baseMap?: MapType): InternalMapSpec | undefined {
-            //TODO do union of maps?
+        function _deconstructMappedSubtypes<T, R extends Type>(
+            ts: T[] | undefined,
+            getMappedType: (mappedT: T) => Type,
+            getUnmappedT: (unmapped: Type | undefined, mappedT: T) => T | undefined,
+            combineArgs: (args: T[]) => R,
+            baseMap?: MapType
+        ) {
+            const deconstructions =
+                ts?.map((t) => {
+                    const deconstruction = _deconstructMappedType2(getMappedType(t), baseMap);
+                    if (deconstruction) {
+                        return { map: deconstruction.map, arg: deconstruction.arg, mappedT: t };
+                    } else {
+                        return undefined;
+                    }
+                }) ?? [];
 
+            const concreteMaps: MapType[] = [];
+            const concreteArgs: T[] = [];
+            deconstructions.forEach((d) => {
+                if (d !== undefined) {
+                    if (d.map) {
+                        concreteMaps.push(d.map);
+                    }
+                    const unmappedT = getUnmappedT(d.arg, d.mappedT);
+                    if (unmappedT) {
+                        concreteArgs.push(unmappedT);
+                    }
+                }
+            });
+            const hasErrors =
+                // at least one map is empty
+                deconstructions.some((d) => !d?.map) ||
+                // at least one arg is empty but not all
+                (deconstructions.some((d) => !d?.arg) && !deconstructions.every((d) => !d?.arg)) ||
+                concreteMaps.length !== deconstructions.length;
+            if (hasErrors) {
+                return undefined;
+            }
+            const map = MapType.combine(concreteMaps);
+            const arg = unsetFlagMapped(combineArgs(concreteArgs));
+            return map ? { map, arg } : undefined;
+        }
+
+        function _deconstructMappedType2(type: Type, baseMap?: MapType): InternalMapSpec | undefined {
             if (baseMap) {
                 if (
                     TypeBase.isInstantiable(type) &&
@@ -376,69 +514,36 @@ export namespace MyPyrightExtensions {
                                 (arg, i) => i > 0 && !isTypeSame(arg.type, (type.priv.tupleTypeArgs ?? [])[i].type)
                             ))
                     ) {
-                        const deconstructions =
-                            type.priv.tupleTypeArgs?.map((a) => {
-                                const deconstruction = _deconstructMappedType2(a.type, baseMap);
-                                if (deconstruction) {
-                                    return {
-                                        deconstruction: deconstruction,
-                                        isUnbounded: a.isUnbounded,
-                                        isOptional: a.isOptional,
-                                    };
-                                } else {
-                                    return undefined;
-                                }
-                            }) ?? [];
-                        const hasErrors =
-                            // at least one map is empty
-                            deconstructions.some((d) => !d?.deconstruction.map) ||
-                            // at least one arg is empty but not all
-                            (deconstructions.some((d) => !d?.deconstruction.arg) &&
-                                !deconstructions.every((d) => !d?.deconstruction.arg));
-                        if (hasErrors) {
-                            return undefined;
-                        }
-                        const concreteDeconstructions: {
-                            deconstruction: InternalMapSpec;
-                            isUnbounded: boolean;
-                            isOptional?: boolean;
-                        }[] = [];
-                        const concreteMaps: MapType[] = [];
-                        const concreteArgs: TupleTypeArg[] = [];
-                        deconstructions.forEach((d) => {
-                            if (d !== undefined) {
-                                concreteDeconstructions.push(d);
-                                if (d.deconstruction.map) {
-                                    concreteMaps.push(d.deconstruction.map);
-                                }
-                                if (d.deconstruction.arg) {
-                                    concreteArgs.push({
-                                        type: d.deconstruction.arg,
-                                        isUnbounded: d.isUnbounded,
-                                        isOptional: d.isOptional,
-                                    });
-                                }
-                            }
-                        });
-                        if (deconstructions.length !== concreteMaps.length) {
-                            return undefined;
-                        }
-                        const map = MapType.combine(concreteMaps);
-                        const arg = unsetFlagMapped(
-                            ClassType.cloneAsInstance(specializeTupleClass(type, concreteArgs))
+                        return _deconstructMappedSubtypes(
+                            type.priv.tupleTypeArgs,
+                            (a) => a.type,
+                            (arg, a) =>
+                                !!arg || a.isUnbounded
+                                    ? {
+                                          type: arg ?? newUnknownType(),
+                                          isUnbounded: a.isUnbounded,
+                                          isOptional: a.isOptional,
+                                      }
+                                    : undefined,
+                            (args) => {
+                                const arg = ClassType.cloneAsInstance(specializeTupleClass(type, args));
+                                arg.priv.isEmptyContainer = args.length === 0;
+                                return arg;
+                            },
+                            baseMap
                         );
-                        arg.priv.isEmptyContainer = deconstructions.length === 0;
-                        return map ? { map, arg } : undefined;
                     } else if (
                         isClass(baseMap.outer) &&
                         (isTypeDest
                             ? ClassType.isDerivedFrom(baseMap.outer, type)
                             : ClassType.isDerivedFrom(type, baseMap.outer))
                     ) {
-                        const arg = firstOptional(type.priv.tupleTypeArgs)?.type ?? firstOptional(type.priv.typeArgs);
+                        const arg = isTupleClass(type)
+                            ? firstOptional(type.priv.tupleTypeArgs)?.type
+                            : firstOptional(type.priv.typeArgs);
                         const innerMapSpec = arg
                             ? _deconstructMappedType2(TypeBase.cloneType(arg), baseMap.inner)
-                            : undefined;
+                            : { map: baseMap.inner, arg: AnyType.create() };
                         return innerMapSpec
                             ? { map: new MapType(specializeMapType(type), innerMapSpec.map), arg: innerMapSpec.arg }
                             : undefined;
@@ -459,6 +564,16 @@ export namespace MyPyrightExtensions {
                             ? { map: new MapType(baseMap.outer, innerMapSpec.map), arg: innerMapSpec.arg }
                             : undefined;
                     }
+                } else if (isUnion(type)) {
+                    return _deconstructMappedSubtypes(
+                        type.priv.subtypes,
+                        (t) => t,
+                        (arg, t) => arg as UnionableType | undefined,
+                        combineTypes,
+                        baseMap
+                    );
+                } else if (isAnyUnknownOrObject(type) || isNoneInstance(type)) {
+                    return { map: baseMap, arg: unsetFlagMapped(TypeBase.cloneType(type)) };
                 }
             } else {
                 return { arg: unsetFlagMapped(type) };
@@ -566,14 +681,7 @@ export namespace MyPyrightExtensions {
     export function specializeMapType(map: Type, type?: Type): Type {
         return mapSubtypes(map, (subtypeOfMap) => {
             if (isClass(subtypeOfMap) && isEffectivelyGenericClassType(subtypeOfMap)) {
-                return specializeMapClassType(
-                    subtypeOfMap,
-                    // A nested map is mapped and specialized with map argument
-                    // If one is found, we need to specialize it with argument `type`
-                    // and then specialize our `map` with the result
-                    // isMappedType(subtypeOfMap) && subtypeOfMap.priv.typeArgs ? specializeMapType(subtypeOfMap.priv.typeArgs[0], type) : type
-                    type ? TypeBase.cloneType(type) : undefined
-                );
+                return specializeMapClassType(subtypeOfMap, type ? TypeBase.cloneType(type) : undefined);
             } else {
                 return TypeBase.cloneType(subtypeOfMap);
             }
