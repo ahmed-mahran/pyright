@@ -1689,6 +1689,12 @@ export function getCodeFlowEngine(
     // type, thus preventing further traversal of the code flow graph.
     function isCallNoReturn(evaluator: TypeEvaluator, flowNode: FlowCall) {
         const node = flowNode.node;
+        const fileInfo = getFileInfo(node);
+
+        // Assume that calls within a pyi file are not "NoReturn" calls.
+        if (fileInfo.isStubFile) {
+            return false;
+        }
 
         if (enablePrintCallNoReturn) {
             console.log(`isCallNoReturn@${flowNode.id} Pre depth ${noReturnAnalysisDepth}`);
@@ -1856,9 +1862,9 @@ export function getCodeFlowEngine(
                         continue;
                     }
 
-                    if (simpleStatement.nodeType === ParseNodeType.Raise && simpleStatement.d.typeExpression) {
+                    if (simpleStatement.nodeType === ParseNodeType.Raise && simpleStatement.d.expr) {
                         // Check for a raising about 'NotImplementedError' or a subtype thereof.
-                        const exceptionType = evaluator.getType(simpleStatement.d.typeExpression);
+                        const exceptionType = evaluator.getType(simpleStatement.d.expr);
 
                         if (
                             exceptionType &&

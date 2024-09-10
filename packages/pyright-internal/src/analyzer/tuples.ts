@@ -15,7 +15,7 @@ import { assignTypeVar as doAssignTypeVar } from './constraintSolver';
 import { ConstraintTracker } from './constraintTracker';
 import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
 import { matchAccumulateSequence } from './sequenceMatching';
-import { TypeEvaluator } from './typeEvaluatorTypes';
+import { AssignTypeFlags, TypeEvaluator } from './typeEvaluatorTypes';
 import {
     AnyType,
     ClassType,
@@ -37,7 +37,6 @@ import {
     TypeVarType,
 } from './types';
 import {
-    AssignTypeFlags,
     isLiteralType,
     isTupleClass,
     isTupleGradualForm,

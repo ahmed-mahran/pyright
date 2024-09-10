@@ -143,6 +143,11 @@ test('TypeIs3', () => {
     TestUtils.validateResults(analysisResults, 5);
 });
 
+test('TypeIs4', () => {
+    const analysisResults = TestUtils.typeAnalyzeSampleFiles(['typeIs4.py']);
+    TestUtils.validateResults(analysisResults, 0);
+});
+
 test('Never1', () => {
     const analysisResults = TestUtils.typeAnalyzeSampleFiles(['never1.py']);
 
@@ -195,7 +200,7 @@ test('TypeVarTuple2', () => {
 
     configOptions.defaultPythonVersion = pythonVersion3_11;
     const analysisResults = TestUtils.typeAnalyzeSampleFiles(['typeVarTuple2.py'], configOptions);
-    TestUtils.validateResults(analysisResults, 15);
+    TestUtils.validateResults(analysisResults, 16);
 });
 
 test('TypeVarTuple3', () => {

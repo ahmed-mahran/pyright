@@ -121,6 +121,7 @@ import { getEffectiveExtraItemsEntryType, getTypedDictMembersForClass } from './
 import { maxCodeComplexity } from './typeEvaluator';
 import {
     Arg,
+    AssignTypeFlags,
     FunctionTypeResult,
     MemberAccessDeprecationInfo,
     Reachability,
@@ -129,9 +130,9 @@ import {
 } from './typeEvaluatorTypes';
 import {
     getElementTypeForContainerNarrowing,
-    isIsinstanceFilterSubclass,
-    isIsinstanceFilterSuperclass,
+    getIsInstanceClassTypes,
     narrowTypeForContainerElementType,
+    narrowTypeForInstanceOrSubclass,
 } from './typeGuards';
 import {
     AnyType,
@@ -169,13 +170,11 @@ import {
     isUnknown,
 } from './types';
 import {
-    AssignTypeFlags,
     ClassMember,
     MemberAccessFlags,
     applySolvedTypeVars,
     buildSolutionFromSpecializedClass,
     convertToInstance,
-    derivesFromAnyOrUnknown,
     derivesFromClassRecursive,
     doForEachSubtype,
     getClassFieldsRecursive,
@@ -707,7 +706,11 @@ export class Checker extends ParseTreeWalker {
 
         this._scopedNodes.push(node);
 
-        if (functionTypeResult && isOverloaded(functionTypeResult.decoratedType)) {
+        if (
+            functionTypeResult &&
+            isOverloaded(functionTypeResult.decoratedType) &&
+            functionTypeResult.functionType.priv.overloaded
+        ) {
             // If this is the implementation for the overloaded function, skip
             // overload consistency checks.
             if (
@@ -1089,46 +1092,12 @@ export class Checker extends ParseTreeWalker {
     }
 
     override visitRaise(node: RaiseNode): boolean {
-        this._evaluator.verifyRaiseExceptionType(node);
+        if (node.d.expr) {
+            this._evaluator.verifyRaiseExceptionType(node.d.expr);
+        }
 
-        if (node.d.valueExpression) {
-            const baseExceptionType = this._evaluator.getBuiltInType(node, 'BaseException') as ClassType;
-            const exceptionType = this._evaluator.getType(node.d.valueExpression);
-
-            // Validate that the argument of "raise" is an exception object or None.
-            if (exceptionType && baseExceptionType && isInstantiableClass(baseExceptionType)) {
-                const diagAddendum = new DiagnosticAddendum();
-
-                doForEachSubtype(exceptionType, (subtype) => {
-                    subtype = this._evaluator.makeTopLevelTypeVarsConcrete(subtype);
-
-                    if (!isAnyOrUnknown(subtype) && !isNoneInstance(subtype)) {
-                        if (isClass(subtype)) {
-                            if (!derivesFromClassRecursive(subtype, baseExceptionType, /* ignoreUnknown */ false)) {
-                                diagAddendum.addMessage(
-                                    LocMessage.exceptionTypeIncorrect().format({
-                                        type: this._evaluator.printType(subtype),
-                                    })
-                                );
-                            }
-                        } else {
-                            diagAddendum.addMessage(
-                                LocMessage.exceptionTypeIncorrect().format({
-                                    type: this._evaluator.printType(subtype),
-                                })
-                            );
-                        }
-                    }
-                });
-
-                if (!diagAddendum.isEmpty()) {
-                    this._evaluator.addDiagnostic(
-                        DiagnosticRule.reportGeneralTypeIssues,
-                        LocMessage.expectedExceptionObj() + diagAddendum.getString(),
-                        node.d.valueExpression
-                    );
-                }
-            }
+        if (node.d.fromExpr) {
+            this._evaluator.verifyRaiseExceptionType(node.d.fromExpr);
         }
 
         return true;
@@ -1584,7 +1553,7 @@ export class Checker extends ParseTreeWalker {
             return false;
         }
 
-        const decls = this._evaluator.getDeclarationsForNameNode(node.d.name);
+        const decls = this._evaluator.getDeclInfoForNameNode(node.d.name)?.decls;
         if (!decls) {
             return false;
         }
@@ -2727,7 +2696,7 @@ export class Checker extends ParseTreeWalker {
     // earlier overload. Typeshed stubs contain type: ignore comments on these
     // lines, so it is important for us to report them in the same manner.
     private _findNodeForOverload(functionNode: FunctionNode, overloadType: FunctionType): FunctionNode | undefined {
-        const decls = this._evaluator.getDeclarationsForNameNode(functionNode.d.name);
+        const decls = this._evaluator.getDeclInfoForNameNode(functionNode.d.name)?.decls;
         if (!decls) {
             return undefined;
         }
@@ -3921,203 +3890,51 @@ export class Checker extends ParseTreeWalker {
             curNode = curNode.parent;
         }
 
-        // Several built-in classes don't follow the normal class hierarchy
-        // rules, so we'll avoid emitting false-positive diagnostics if these
-        // are used.
-        const nonstandardClassTypes = [
-            'FunctionType',
-            'LambdaType',
-            'BuiltinFunctionType',
-            'BuiltinMethodType',
-            'type',
-            'Type',
-        ];
+        const classTypeList = getIsInstanceClassTypes(this._evaluator, arg1Type);
+        if (!classTypeList) {
+            return;
+        }
 
-        const classTypeList: ClassType[] = [];
-        let arg1IncludesSubclasses = false;
-
-        doForEachSubtype(arg1Type, (arg1Subtype) => {
-            if (isClass(arg1Subtype)) {
-                if (TypeBase.isInstantiable(arg1Subtype)) {
-                    if (arg1Subtype.priv.literalValue === undefined) {
-                        classTypeList.push(arg1Subtype);
-                        if (
-                            ClassType.isBuiltIn(arg1Subtype) &&
-                            nonstandardClassTypes.some((name) => name === arg1Subtype.shared.name)
-                        ) {
-                            isValidType = false;
-                        }
-
-                        if (arg1Subtype.priv.includeSubclasses) {
-                            arg1IncludesSubclasses = true;
-                        }
-                    }
-
-                    if (arg0Type) {
-                        this._validateUnsafeProtocolOverlap(
-                            node.d.args[0].d.valueExpr,
-                            convertToInstance(arg1Subtype),
-                            isInstanceCheck ? arg0Type : convertToInstance(arg0Type)
-                        );
-                    }
-                } else {
-                    // The isinstance and issubclass call supports a variation where the second
-                    // parameter is a tuple of classes.
-                    if (isTupleClass(arg1Subtype)) {
-                        if (arg1Subtype.priv.tupleTypeArgs) {
-                            arg1Subtype.priv.tupleTypeArgs.forEach((typeArg) => {
-                                if (isInstantiableClass(typeArg.type)) {
-                                    classTypeList.push(typeArg.type);
-
-                                    if (typeArg.type.priv.includeSubclasses) {
-                                        arg1IncludesSubclasses = true;
-                                    }
-
-                                    if (arg0Type) {
-                                        this._validateUnsafeProtocolOverlap(
-                                            node.d.args[0].d.valueExpr,
-                                            convertToInstance(typeArg.type),
-                                            isInstanceCheck ? arg0Type : convertToInstance(arg0Type)
-                                        );
-                                    }
-                                } else {
-                                    isValidType = false;
-                                }
-                            });
-                        }
-                    } else {
-                        if (arg1Subtype.priv.includeSubclasses) {
-                            arg1IncludesSubclasses = true;
-                        }
-                    }
-
-                    if (
-                        ClassType.isBuiltIn(arg1Subtype) &&
-                        nonstandardClassTypes.some((name) => name === arg1Subtype.shared.name)
-                    ) {
-                        isValidType = false;
-                    }
-                }
-            } else {
-                isValidType = false;
+        // Check for unsafe protocol overlaps.
+        classTypeList.forEach((filterType) => {
+            if (isInstantiableClass(filterType)) {
+                this._validateUnsafeProtocolOverlap(
+                    node.d.args[0].d.valueExpr,
+                    convertToInstance(filterType),
+                    isInstanceCheck ? arg0Type : convertToInstance(arg0Type)
+                );
             }
         });
 
-        if (!isValidType) {
-            return;
-        }
-
-        if (derivesFromAnyOrUnknown(arg0Type)) {
-            return;
-        }
-
-        const finalizeFilteredTypeList = (types: Type[]): Type => {
-            return combineTypes(types);
-        };
-
-        const filterType = (varType: ClassType): Type[] => {
-            const filteredTypes: Type[] = [];
-
-            for (const filterType of classTypeList) {
-                const filterIsSuperclass = isIsinstanceFilterSuperclass(
-                    this._evaluator,
-                    varType,
-                    varType,
-                    filterType,
-                    filterType,
-                    isInstanceCheck
-                );
-                const filterIsSubclass = isIsinstanceFilterSubclass(
-                    this._evaluator,
-                    varType,
-                    filterType,
-                    isInstanceCheck
-                );
-
-                // Normally, a class should never be both a subclass and a
-                // superclass. However, this can happen if one of the classes
-                // derives from an unknown type. In this case, we'll add an
-                // unknown type into the filtered type list to avoid any
-                // false positives.
-                const isClassRelationshipIndeterminate =
-                    filterIsSuperclass && filterIsSubclass && !ClassType.isSameGenericClass(varType, filterType);
-
-                if (isClassRelationshipIndeterminate) {
-                    filteredTypes.push(UnknownType.create());
-                } else if (filterIsSuperclass) {
-                    // If the variable type is a subclass of the isinstance
-                    // filter, we haven't learned anything new about the
-                    // variable type.
-                    filteredTypes.push(varType);
-                } else if (filterIsSubclass) {
-                    // If the variable type is a superclass of the isinstance
-                    // filter, we can narrow the type to the subclass.
-                    filteredTypes.push(filterType);
-                }
-            }
-
-            if (!isInstanceCheck) {
-                return filteredTypes;
-            }
-
-            // Make all instantiable classes into instances before returning them.
-            return filteredTypes.map((t) => (isInstantiableClass(t) ? ClassType.cloneAsInstance(t) : t));
-        };
-
-        let filteredType: Type;
-        if (isInstanceCheck && isClassInstance(arg0Type)) {
-            const remainingTypes = filterType(ClassType.cloneAsInstantiable(arg0Type));
-            filteredType = finalizeFilteredTypeList(remainingTypes);
-        } else if (!isInstanceCheck && isInstantiableClass(arg0Type)) {
-            const remainingTypes = filterType(arg0Type);
-            filteredType = finalizeFilteredTypeList(remainingTypes);
-        } else if (isUnion(arg0Type)) {
-            let remainingTypes: Type[] = [];
-            let foundAnyType = false;
-
-            doForEachSubtype(arg0Type, (subtype) => {
-                if (isAnyOrUnknown(subtype)) {
-                    foundAnyType = true;
-                }
-
-                if (isInstanceCheck && isClassInstance(subtype)) {
-                    remainingTypes = remainingTypes.concat(filterType(ClassType.cloneAsInstantiable(subtype)));
-                } else if (!isInstanceCheck && isInstantiableClass(subtype)) {
-                    remainingTypes = remainingTypes.concat(filterType(subtype));
-                }
-            });
-
-            filteredType = finalizeFilteredTypeList(remainingTypes);
-
-            // If we found an any or unknown type, all bets are off.
-            if (foundAnyType) {
-                return;
-            }
-        } else {
-            return;
-        }
-
-        const getTestType = () => {
-            const objTypeList = classTypeList.map((t) => ClassType.cloneAsInstance(t));
-            return combineTypes(objTypeList);
-        };
-
-        // If arg1IncludesSubclasses is true, it contains a Type[X] class rather than X. A Type[X]
-        // could be a subclass of X, so the "unnecessary isinstance check" may be legit.
-        if (!arg1IncludesSubclasses && isTypeSame(filteredType, arg0Type, { ignorePseudoGeneric: true })) {
-            this._evaluator.addDiagnostic(
-                DiagnosticRule.reportUnnecessaryIsInstance,
-                isInstanceCheck
-                    ? LocMessage.unnecessaryIsInstanceAlways().format({
-                          testType: this._evaluator.printType(arg0Type),
-                          classType: this._evaluator.printType(getTestType()),
-                      })
-                    : LocMessage.unnecessaryIsSubclassAlways().format({
-                          testType: this._evaluator.printType(arg0Type),
-                          classType: this._evaluator.printType(getTestType()),
-                      }),
+        // Check for unnecessary isinstance or issubclass calls.
+        if (this._fileInfo.diagnosticRuleSet.reportUnnecessaryIsInstance !== 'none') {
+            const narrowedTypeNegative = narrowTypeForInstanceOrSubclass(
+                this._evaluator,
+                arg0Type,
+                classTypeList,
+                isInstanceCheck,
+                /* isTypeIsCheck */ false,
+                /* isPositiveTest */ false,
                 node
             );
+
+            if (isNever(narrowedTypeNegative)) {
+                const classType = combineTypes(classTypeList.map((t) => convertToInstance(t)));
+
+                this._evaluator.addDiagnostic(
+                    DiagnosticRule.reportUnnecessaryIsInstance,
+                    isInstanceCheck
+                        ? LocMessage.unnecessaryIsInstanceAlways().format({
+                              testType: this._evaluator.printType(arg0Type),
+                              classType: this._evaluator.printType(classType),
+                          })
+                        : LocMessage.unnecessaryIsSubclassAlways().format({
+                              testType: this._evaluator.printType(arg0Type),
+                              classType: this._evaluator.printType(classType),
+                          }),
+                    node
+                );
+            }
         }
     }
 
@@ -4212,7 +4029,7 @@ export class Checker extends ParseTreeWalker {
                         isSupported = false;
                     } else if (
                         subtype.props?.specialForm &&
-                        isInstantiableClass(subtype.props.specialForm) &&
+                        isClassInstance(subtype.props.specialForm) &&
                         ClassType.isBuiltIn(subtype.props.specialForm, 'Annotated')
                     ) {
                         diag.addMessage(LocAddendum.annotatedNotAllowed());
@@ -4655,8 +4472,8 @@ export class Checker extends ParseTreeWalker {
         // any variable declarations that are bound using nonlocal
         // or global explicit bindings.
         const declarations = this._evaluator
-            .getDeclarationsForNameNode(node)
-            ?.filter((decl) => decl.type !== DeclarationType.Variable || !decl.isExplicitBinding);
+            .getDeclInfoForNameNode(node)
+            ?.decls?.filter((decl) => decl.type !== DeclarationType.Variable || !decl.isExplicitBinding);
 
         let primaryDeclaration =
             declarations && declarations.length > 0 ? declarations[declarations.length - 1] : undefined;
@@ -4840,7 +4657,9 @@ export class Checker extends ParseTreeWalker {
 
         if (isTypeIs) {
             const scopeIds = getTypeVarScopeIds(functionType);
-            const typeGuardType = makeTypeVarsBound(returnType.priv.typeArgs[0], scopeIds);
+            const narrowedType = returnType.priv.typeArgs[0];
+            let typeGuardType = makeTypeVarsBound(narrowedType, scopeIds);
+            typeGuardType = TypeBase.cloneWithTypeForm(typeGuardType, typeGuardType);
 
             // Determine the type of the first parameter.
             const paramIndex = isMethod && !FunctionType.isStaticMethod(functionType) ? 1 : 0;
@@ -4858,7 +4677,7 @@ export class Checker extends ParseTreeWalker {
                         DiagnosticRule.reportGeneralTypeIssues,
                         LocMessage.typeIsReturnType().format({
                             type: this._evaluator.printType(paramType),
-                            returnType: this._evaluator.printType(typeGuardType),
+                            returnType: this._evaluator.printType(narrowedType),
                         }),
                         returnAnnotation
                     );
@@ -5023,6 +4842,7 @@ export class Checker extends ParseTreeWalker {
     private _validateFinalMemberOverrides(classType: ClassType) {
         ClassType.getSymbolTable(classType).forEach((localSymbol, name) => {
             const parentSymbol = lookUpClassMember(classType, name, MemberAccessFlags.SkipOriginalClass);
+
             if (parentSymbol && isInstantiableClass(parentSymbol.classType) && !SymbolNameUtils.isPrivateName(name)) {
                 // Did the parent class explicitly declare the variable as final?
                 if (this._evaluator.isFinalVariable(parentSymbol.symbol)) {
@@ -5036,7 +4856,7 @@ export class Checker extends ParseTreeWalker {
                         decl.node
                     );
                 } else if (
-                    ClassType.isReadOnlyInstanceVariables(parentSymbol.classType) &&
+                    ClassType.hasNamedTupleEntry(parentSymbol.classType, name) &&
                     !SymbolNameUtils.isDunderName(name)
                 ) {
                     // If the parent class is a named tuple, all instance variables
@@ -5462,7 +5282,7 @@ export class Checker extends ParseTreeWalker {
                         // If this is part of a dataclass, a class handled by a dataclass_transform,
                         // or a NamedTuple, exempt it because the class variable will be transformed
                         // into an instance variable in this case.
-                        if (ClassType.isDataClass(classType) || ClassType.isReadOnlyInstanceVariables(classType)) {
+                        if (ClassType.isDataClass(classType) || ClassType.hasNamedTupleEntry(classType, name)) {
                             return true;
                         }
 
