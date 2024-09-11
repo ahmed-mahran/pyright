@@ -2916,6 +2916,13 @@ export namespace TypeVarType {
             newInstance.shared.kind = TypeVarKind.TypeVar;
         }
         newInstance.shared.subscript = { base: type, kind, index };
+        if (
+            newInstance.priv.freeTypeVar &&
+            isTypeVarTuple(newInstance.priv.freeTypeVar) &&
+            !newInstance.priv.freeTypeVar.shared.subscript
+        ) {
+            newInstance.priv.freeTypeVar = cloneAsSubscripted(newInstance.priv.freeTypeVar, index, kind);
+        }
         return newInstance;
     }
 
