@@ -27,7 +27,6 @@ import {
     isTypeVar,
     isTypeVarTuple,
     isUnpackedTypeVarTuple,
-    NeverType,
     SubscriptKind,
     TupleTypeArg,
     Type,
@@ -379,7 +378,6 @@ export function matchTupleTypeArgs(
         matches,
         toStr,
         toStr,
-        { type: NeverType.createNever(), isUnbounded: false },
         recursionCount
     );
     if (!wasLocked) {
@@ -395,7 +393,7 @@ export function matchTupleTypeArgs(
 //   we have completely ignored *Vs.
 // - *Vs and *Ds each could match one type and hence effectively V matches *Ds and *Vs matches D but how is it possible
 //   to assign *Ds to V, so this is not a valid assignment.
-// - V matches the first type of *Ds: Ds[0],  and *Vs matches the rest of *Ds and D: *Ds[1:], V.
+// - V matches the first type of *Ds: Ds[0],  and *Vs matches the rest of *Ds and D: *Ds[1:], D.
 //   This way we have got a valid generic assignment of V and *Vs
 // This function traverses matched sequence pairs allocating source type var tuples propely to
 // matched destination types. If a singular dest type matches a type var tuple, it is assigned an element

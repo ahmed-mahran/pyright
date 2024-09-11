@@ -91,7 +91,6 @@ export function matchAccumulateSequence<DestType, SrcType>(
     destMatchesSrc: (dest: DestType, src: SrcType) => boolean,
     destStr: (dest: DestType | undefined) => string,
     srcStr: (src: SrcType | undefined) => string,
-    destEmptyType: DestType,
     recursionCount: number
 ): { destSequence: DestType[]; srcSequence: SrcType[] }[] | undefined {
     class MatchAccumulateSequenceAccumulator
@@ -146,15 +145,7 @@ export function matchAccumulateSequence<DestType, SrcType>(
                 );
             } else if (destType === undefined && srcType !== undefined && isRepeatedSrc(srcType)) {
                 // srcType matches zero dest
-                copy._withLastAcc(
-                    (/* onEmpty */) => {
-                        copy.acc.push({ destSequence: [destEmptyType], srcSequence: [srcType] });
-                    },
-                    (lastAcc) => {
-                        lastAcc.destSequence.push(destEmptyType);
-                        lastAcc.srcSequence.push(srcType);
-                    }
-                );
+                // do nothing
             } else if (destType !== undefined && isRepeatedDest(destType) && srcType === undefined) {
                 // destType matches zero src
                 copy._withLastAcc(
