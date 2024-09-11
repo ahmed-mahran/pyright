@@ -22,7 +22,14 @@ import {
     UnionableType,
     UnknownType,
 } from './types';
-import { InferenceContext, isNoneInstance, isTupleClass, mapSubtypes, specializeTupleClass } from './typeUtils';
+import {
+    InferenceContext,
+    isLiteralLikeType,
+    isNoneInstance,
+    isTupleClass,
+    mapSubtypes,
+    specializeTupleClass,
+} from './typeUtils';
 
 export namespace MyPyrightExtensions {
     const enum TupleCreationFlags {
@@ -491,13 +498,15 @@ export namespace MyPyrightExtensions {
         function _deconstructMappedType2(type: Type, baseMap?: MapType): InternalMapSpec | undefined {
             if (baseMap) {
                 if (
-                    TypeBase.isInstantiable(type) &&
-                    !TypeBase.isInstance(type) &&
+                    ((TypeBase.isInstantiable(type) && !TypeBase.isInstance(type)) ||
+                        (isClass(type) && isLiteralLikeType(type))) &&
                     isClass(baseMap.outer) &&
                     ClassType.isBuiltIn(baseMap.outer, 'type')
                 ) {
                     const innerMapSpec = _deconstructMappedType2(
-                        TypeBase.cloneTypeAsInstance(type, /* cache */ false),
+                        TypeBase.isInstantiable(type)
+                            ? TypeBase.cloneTypeAsInstance(type, /* cache */ false)
+                            : TypeBase.cloneType(type),
                         baseMap.inner
                     );
                     return innerMapSpec
