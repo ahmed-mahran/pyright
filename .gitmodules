@@ -1,0 +1,3 @@
+[submodule "packages/mypyright_extensions"]
+	path = packages/mypyright_extensions
+	url = git@github.com:ahmed-mahran/mypyright_extensions.git
