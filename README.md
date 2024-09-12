@@ -1,5 +1,10 @@
 ![Pyright](https://github.com/microsoft/pyright/blob/main/docs/img/PyrightLarge.png)
 
+[![Visual Studio Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/mashin.mypyright?logo=visual%20studio%20code)
+](https://marketplace.visualstudio.com/items?itemName=mashin.mypyright)
+[![Visual Studio Marketplace Downloads](https://img.shields.io/visual-studio-marketplace/d/mashin.mypyright?logo=visual%20studio%20code)
+](https://marketplace.visualstudio.com/items?itemName=mashin.mypyright)
+
 # Static Type Checker for Tensors
 
 This is a fork of [Pyright](https://github.com/microsoft/pyright) with added features beyond accepted [typing PEPs](https://peps.python.org/topic/typing/) to support [typed tensors](https://github.com/ahmed-mahran/typedtensor).
