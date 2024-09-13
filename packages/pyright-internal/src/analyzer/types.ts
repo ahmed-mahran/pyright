@@ -13,6 +13,7 @@ import { ArgumentNode, ExpressionNode, NameNode, ParamCategory } from '../parser
 import { ClassDeclaration, FunctionDeclaration, SpecialBuiltInClassDeclaration } from './declaration';
 import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
 import { Symbol, SymbolTable } from './symbol';
+import { isTupleClass } from './typeUtils';
 
 export const enum TypeCategory {
     // Name is not bound to a value of any type
@@ -2914,6 +2915,19 @@ export namespace TypeVarType {
         const newInstance = cloneForNewName(type, `${type.shared.name}${subscriptString}`);
         if (kind === SubscriptKind.Index) {
             newInstance.shared.kind = TypeVarKind.TypeVar;
+            function combineVariadicBounds(boundType: Type | undefined, set: (combined: Type) => void) {
+                if (!!boundType && isClass(boundType) && isTupleClass(boundType)) {
+                    set(combineTypes((boundType.priv.tupleTypeArgs ?? []).map((a) => a.type)));
+                }
+            }
+            combineVariadicBounds(
+                newInstance.shared.boundType,
+                (combined) => (newInstance.shared.boundType = combined)
+            );
+            combineVariadicBounds(
+                newInstance.shared.mappedBoundType,
+                (combined) => (newInstance.shared.mappedBoundType = combined)
+            );
         }
         newInstance.shared.subscript = { base: type, kind, index };
         if (
