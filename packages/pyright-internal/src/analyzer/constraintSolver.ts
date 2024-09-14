@@ -1034,8 +1034,8 @@ function assignUnconstrainedTypeVar(
 
             constraints.setBounds(
                 MyPyrightExtensions.setFlagMapped(TypeBase.cloneType(destType)),
-                MyPyrightExtensions.convertToMappedType(evaluator, map, newLowerBound),
-                MyPyrightExtensions.convertToMappedType(evaluator, map, newUpperBound),
+                newLowerBound ? MyPyrightExtensions.convertToMappedType(evaluator, map, newLowerBound) : undefined,
+                newUpperBound ? MyPyrightExtensions.convertToMappedType(evaluator, map, newUpperBound) : undefined,
                 retainLiterals
             );
         }

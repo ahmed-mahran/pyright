@@ -27,6 +27,7 @@ import {
     isLiteralLikeType,
     isNoneInstance,
     isTupleClass,
+    isTupleGradualForm,
     mapSubtypes,
     specializeTupleClass,
 } from './typeUtils';
@@ -367,9 +368,7 @@ export namespace MyPyrightExtensions {
             const concreteArgs = deconstructions.map((d) => getUnmappedT(d.arg, d.mappedT)).filter((a) => !!a) as T[];
             const hasErrors =
                 // at least one map is empty
-                deconstructions.some((d) => !d.map) ||
-                // at least one arg is empty but not all
-                (deconstructions.some((d) => !d.arg) && !deconstructions.every((d) => !d.arg));
+                deconstructions.some((d) => !d.map);
             if (hasErrors) {
                 return {};
             }
@@ -389,14 +388,11 @@ export namespace MyPyrightExtensions {
                         return _deconstructMappedSubtypes(
                             type.priv.tupleTypeArgs,
                             (a) => a.type,
-                            (arg, a) =>
-                                !!arg || a.isUnbounded
-                                    ? {
-                                          type: arg ?? newUnknownType(),
-                                          isUnbounded: a.isUnbounded,
-                                          isOptional: a.isOptional,
-                                      }
-                                    : undefined,
+                            (arg, a) => ({
+                                type: arg ?? AnyType.create(),
+                                isUnbounded: a.isUnbounded,
+                                isOptional: a.isOptional,
+                            }),
                             (args) => {
                                 const arg = ClassType.cloneAsInstance(specializeTupleClass(type, args));
                                 arg.priv.isEmptyContainer = args.length === 0;
@@ -408,9 +404,7 @@ export namespace MyPyrightExtensions {
                     const firstArg = isTupleClass(type)
                         ? firstOptional(type.priv.tupleTypeArgs)?.type
                         : firstOptional(type.priv.typeArgs);
-                    const internalMapSpec = firstArg
-                        ? _deconstructMappedType(TypeBase.cloneType(firstArg))
-                        : { arg: AnyType.create() };
+                    const internalMapSpec = firstArg ? _deconstructMappedType(TypeBase.cloneType(firstArg)) : undefined;
                     return {
                         map: new MapType(specializeMapType(type), internalMapSpec?.map),
                         arg: internalMapSpec?.arg,
@@ -419,13 +413,16 @@ export namespace MyPyrightExtensions {
                     //TODO handle constraints maybe?
                     const clone = unsetFlagMapped(TypeBase.cloneType(type));
                     const { map, arg } = _deconstructMappedType(type.shared.mappedBoundType);
-                    clone.shared.boundType = arg;
+                    clone.shared.boundType = !!arg && !isTupleGradualForm(arg) ? arg : undefined;
                     return { map, arg: clone };
                 } else if (isUnion(type)) {
                     return _deconstructMappedSubtypes(
                         type.priv.subtypes,
                         (t) => t,
-                        (arg, t) => arg as UnionableType | undefined,
+                        // e.g. some mapped classes are not specialized like (Type),
+                        // in this case we get undefined arg, but for Union we assume
+                        // arg is Any
+                        (arg, t) => (arg ?? AnyType.create()) as UnionableType | undefined,
                         combineTypes
                     );
                 } else {
@@ -484,8 +481,8 @@ export namespace MyPyrightExtensions {
             const hasErrors =
                 // at least one map is empty
                 deconstructions.some((d) => !d?.map) ||
-                // at least one arg is empty but not all
-                (deconstructions.some((d) => !d?.arg) && !deconstructions.every((d) => !d?.arg)) ||
+                //// at least one arg is empty but not all
+                //(deconstructions.some((d) => !d?.arg) && !deconstructions.every((d) => !d?.arg)) ||
                 concreteMaps.length !== deconstructions.length;
             if (hasErrors) {
                 return undefined;
@@ -526,14 +523,11 @@ export namespace MyPyrightExtensions {
                         return _deconstructMappedSubtypes(
                             type.priv.tupleTypeArgs,
                             (a) => a.type,
-                            (arg, a) =>
-                                !!arg || a.isUnbounded
-                                    ? {
-                                          type: arg ?? newUnknownType(),
-                                          isUnbounded: a.isUnbounded,
-                                          isOptional: a.isOptional,
-                                      }
-                                    : undefined,
+                            (arg, a) => ({
+                                type: arg ?? AnyType.create(),
+                                isUnbounded: a.isUnbounded,
+                                isOptional: a.isOptional,
+                            }),
                             (args) => {
                                 const arg = ClassType.cloneAsInstance(specializeTupleClass(type, args));
                                 arg.priv.isEmptyContainer = args.length === 0;
@@ -552,7 +546,7 @@ export namespace MyPyrightExtensions {
                             : firstOptional(type.priv.typeArgs);
                         const innerMapSpec = arg
                             ? _deconstructMappedType2(TypeBase.cloneType(arg), baseMap.inner)
-                            : { map: baseMap.inner, arg: AnyType.create() };
+                            : { map: baseMap.inner };
                         return innerMapSpec
                             ? { map: new MapType(specializeMapType(type), innerMapSpec.map), arg: innerMapSpec.arg }
                             : undefined;
@@ -563,7 +557,7 @@ export namespace MyPyrightExtensions {
                     const clone = unsetFlagMapped(TypeBase.cloneType(type));
                     if (type.shared.mappedBoundType) {
                         const innerMapSpec = _deconstructMappedType2(type.shared.mappedBoundType, baseMap);
-                        if (innerMapSpec) {
+                        if (!!innerMapSpec?.arg && !isTupleGradualForm(innerMapSpec.arg)) {
                             clone.shared.boundType = innerMapSpec.arg;
                         }
                         return innerMapSpec ? { map: innerMapSpec.map, arg: clone } : undefined;
@@ -577,7 +571,10 @@ export namespace MyPyrightExtensions {
                     return _deconstructMappedSubtypes(
                         type.priv.subtypes,
                         (t) => t,
-                        (arg, t) => arg as UnionableType | undefined,
+                        // e.g. some mapped classes are not specialized like (Type),
+                        // in this case we get undefined arg, but for Union we assume
+                        // arg is Any
+                        (arg, t) => (arg ?? AnyType.create()) as UnionableType | undefined,
                         combineTypes,
                         baseMap
                     );
