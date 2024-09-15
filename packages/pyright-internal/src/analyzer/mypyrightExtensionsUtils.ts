@@ -10,7 +10,6 @@ import {
     isAnyUnknownOrObject,
     isClass,
     isTypeSame,
-    isTypeVar,
     isTypeVarTuple,
     isUnion,
     isUnknown,
@@ -286,7 +285,7 @@ export namespace MyPyrightExtensions {
         }
 
         export function mapToType(map: MapType): Type {
-            return map.inner ? specializeMapType(map.outer, mapToType(map.inner)) : map.outer;
+            return map.inner ? specializeMapType(map.outer, mapToType(map.inner)) : TypeBase.cloneType(map.outer);
         }
 
         export function specialize(map: MapType, arg?: Type): Type {
@@ -409,12 +408,16 @@ export namespace MyPyrightExtensions {
                         map: new MapType(specializeMapType(type), internalMapSpec?.map),
                         arg: internalMapSpec?.arg,
                     };
-                } else if (isTypeVar(type) && type.shared.mappedBoundType) {
+                } else if (isTypeVarTuple(type)) {
                     //TODO handle constraints maybe?
                     const clone = unsetFlagMapped(TypeBase.cloneType(type));
-                    const { map, arg } = _deconstructMappedType(type.shared.mappedBoundType);
-                    clone.shared.boundType = !!arg && !isTupleGradualForm(arg) ? arg : undefined;
-                    return { map, arg: clone };
+                    if (type.shared.mappedBoundType) {
+                        const { map, arg } = _deconstructMappedType(type.shared.mappedBoundType);
+                        clone.shared.boundType = !!arg && !isTupleGradualForm(arg) ? arg : undefined;
+                        return { map, arg: clone };
+                    } else {
+                        return {};
+                    }
                 } else if (isUnion(type)) {
                     return _deconstructMappedSubtypes(
                         type.priv.subtypes,
@@ -551,21 +554,21 @@ export namespace MyPyrightExtensions {
                             ? { map: new MapType(specializeMapType(type), innerMapSpec.map), arg: innerMapSpec.arg }
                             : undefined;
                     }
-                } else if (isTypeVar(type)) {
+                } else if (isTypeVarTuple(type)) {
                     //TODO handle constraints maybe?
 
                     const clone = unsetFlagMapped(TypeBase.cloneType(type));
-                    if (type.shared.mappedBoundType) {
-                        const innerMapSpec = _deconstructMappedType2(type.shared.mappedBoundType, baseMap);
-                        if (!!innerMapSpec?.arg && !isTupleGradualForm(innerMapSpec.arg)) {
-                            clone.shared.boundType = innerMapSpec.arg;
-                        }
+                    const boundType = isMappedType(type) ? type.shared.mappedBoundType : type.shared.boundType;
+                    if (boundType) {
+                        const innerMapSpec = _deconstructMappedType2(boundType, baseMap);
                         return innerMapSpec ? { map: innerMapSpec.map, arg: clone } : undefined;
                     } else {
-                        const innerMapSpec = _deconstructMappedType2(clone, baseMap.inner);
-                        return innerMapSpec
-                            ? { map: new MapType(baseMap.outer, innerMapSpec.map), arg: innerMapSpec.arg }
-                            : undefined;
+                        if (isMappedType(type)) {
+                            clone.shared.mappedBoundType = setFlagMapped(baseMap.type);
+                        } else {
+                            clone.shared.boundType = unsetFlagMapped(baseMap.type);
+                        }
+                        return { map: baseMap, arg: clone };
                     }
                 } else if (isUnion(type)) {
                     return _deconstructMappedSubtypes(
