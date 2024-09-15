@@ -747,6 +747,7 @@ function createFunctionFromMetaclassCall(
     }
 
     const callInfo = lookUpClassMember(
+        evaluator,
         metaclass,
         '__call__',
         MemberAccessFlags.SkipInstanceMembers |
@@ -801,6 +802,7 @@ function createFunctionFromNewMethod(
     recursionCount: number
 ): FunctionType | OverloadedType | undefined {
     const newInfo = lookUpClassMember(
+        evaluator,
         classType,
         '__new__',
         MemberAccessFlags.SkipInstanceMembers |
@@ -908,6 +910,7 @@ function createFunctionFromInitMethod(
 ): FunctionType | OverloadedType | undefined {
     // Use the __init__ method if available. It's usually more detailed.
     const initInfo = lookUpClassMember(
+        evaluator,
         classType,
         '__init__',
         MemberAccessFlags.SkipInstanceMembers |

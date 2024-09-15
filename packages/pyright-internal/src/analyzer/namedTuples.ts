@@ -419,14 +419,19 @@ export function createNamedTupleType(
         classFields.set('__match_args__', Symbol.createWithType(SymbolFlags.ClassMember, matchArgsType));
     }
 
-    updateNamedTupleBaseClass(classType, entryTypes, !addGenericGetAttribute);
+    updateNamedTupleBaseClass(evaluator, classType, entryTypes, !addGenericGetAttribute);
 
-    computeMroLinearization(classType);
+    computeMroLinearization(evaluator, classType);
 
     return classType;
 }
 
-export function updateNamedTupleBaseClass(classType: ClassType, typeArgs: Type[], isTypeArgExplicit: boolean): boolean {
+export function updateNamedTupleBaseClass(
+    evaluator: TypeEvaluator,
+    classType: ClassType,
+    typeArgs: Type[],
+    isTypeArgExplicit: boolean
+): boolean {
     let isUpdateNeeded = false;
 
     classType.shared.baseClasses = classType.shared.baseClasses.map((baseClass) => {
@@ -461,7 +466,7 @@ export function updateNamedTupleBaseClass(classType: ClassType, typeArgs: Type[]
             }
         );
 
-        computeMroLinearization(clonedNamedTupleClass);
+        computeMroLinearization(evaluator, clonedNamedTupleClass);
 
         isUpdateNeeded = true;
         return clonedNamedTupleClass;

@@ -12,9 +12,10 @@ import { assert } from '../common/debug';
 import { ArgumentNode, ParamCategory } from '../parser/parseNodes';
 import { ConstraintSolution, ConstraintSolutionSet } from './constraintSolution';
 import { DeclarationType } from './declaration';
+import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
 import { Symbol, SymbolFlags, SymbolTable } from './symbol';
 import { isEffectivelyClassVar, isTypedDictMemberAccessedThroughIndex } from './symbolUtils';
-import { ApplyTypeVarOptions, ArgWithExpression } from './typeEvaluatorTypes';
+import { ApplyTypeVarOptions, ArgWithExpression, TypeEvaluator } from './typeEvaluatorTypes';
 import {
     AnyType,
     ClassType,
@@ -966,9 +967,21 @@ export function isTypeAliasRecursive(typeAliasPlaceholder: TypeVarType, type: Ty
 
 // Recursively transforms all top-level TypeVars that represent recursive
 // type aliases into their actual types.
-export function transformPossibleRecursiveTypeAlias(type: Type, recursionCount?: number): Type;
-export function transformPossibleRecursiveTypeAlias(type: Type | undefined, recursionCount?: number): Type | undefined;
-export function transformPossibleRecursiveTypeAlias(type: Type | undefined, recursionCount = 0): Type | undefined {
+export function transformPossibleRecursiveTypeAlias(
+    evaluator: TypeEvaluator,
+    type: Type,
+    recursionCount?: number
+): Type;
+export function transformPossibleRecursiveTypeAlias(
+    evaluator: TypeEvaluator,
+    type: Type | undefined,
+    recursionCount?: number
+): Type | undefined;
+export function transformPossibleRecursiveTypeAlias(
+    evaluator: TypeEvaluator,
+    type: Type | undefined,
+    recursionCount = 0
+): Type | undefined {
     if (recursionCount >= maxTypeRecursionCount) {
         return type;
     }
@@ -983,18 +996,21 @@ export function transformPossibleRecursiveTypeAlias(type: Type | undefined, recu
                 : type.shared.boundType;
 
             if (!aliasInfo?.typeArgs || !type.shared.recursiveAlias.typeParams) {
-                return transformPossibleRecursiveTypeAlias(unspecializedType, recursionCount);
+                return transformPossibleRecursiveTypeAlias(evaluator, unspecializedType, recursionCount);
             }
 
-            const solution = buildSolution(type.shared.recursiveAlias.typeParams, aliasInfo.typeArgs);
+            const solution = buildSolution(evaluator, type.shared.recursiveAlias.typeParams, aliasInfo.typeArgs);
             return transformPossibleRecursiveTypeAlias(
+                evaluator,
                 applySolvedTypeVars(unspecializedType, solution),
                 recursionCount
             );
         }
 
         if (isUnion(type) && type.priv.includesRecursiveTypeAlias) {
-            let newType = mapSubtypes(type, (subtype) => transformPossibleRecursiveTypeAlias(subtype, recursionCount));
+            let newType = mapSubtypes(type, (subtype) =>
+                transformPossibleRecursiveTypeAlias(evaluator, subtype, recursionCount)
+            );
 
             if (newType !== type && aliasInfo) {
                 // Copy the type alias information if present.
@@ -1123,7 +1139,7 @@ export function selfSpecializeClass(type: ClassType, options?: SelfSpecializeOpt
 
 // Determines whether the type derives from tuple. If so, it returns
 // the specialized tuple type.
-export function getSpecializedTupleType(type: Type): ClassType | undefined {
+export function getSpecializedTupleType(evaluator: TypeEvaluator, type: Type): ClassType | undefined {
     let classType: ClassType | undefined;
 
     if (isInstantiableClass(type)) {
@@ -1147,7 +1163,7 @@ export function getSpecializedTupleType(type: Type): ClassType | undefined {
         return classType;
     }
 
-    const solution = buildSolutionFromSpecializedClass(classType);
+    const solution = buildSolutionFromSpecializedClass(evaluator, classType);
     return applySolvedTypeVars(tupleClass, solution) as ClassType;
 }
 
@@ -1288,7 +1304,7 @@ export function isProperty(type: Type) {
     return isClassInstance(type) && ClassType.isPropertyClass(type);
 }
 
-export function isCallableType(type: Type): boolean {
+export function isCallableType(evaluator: TypeEvaluator, type: Type): boolean {
     if (isFunction(type) || isOverloaded(type) || isAnyOrUnknown(type)) {
         return true;
     }
@@ -1302,12 +1318,12 @@ export function isCallableType(type: Type): boolean {
             return true;
         }
 
-        const callMember = lookUpObjectMember(type, '__call__', MemberAccessFlags.SkipInstanceMembers);
+        const callMember = lookUpObjectMember(evaluator, type, '__call__', MemberAccessFlags.SkipInstanceMembers);
         return !!callMember;
     }
 
     if (isUnion(type)) {
-        return type.priv.subtypes.every((subtype) => isCallableType(subtype));
+        return type.priv.subtypes.every((subtype) => isCallableType(evaluator, subtype));
     }
 
     return false;
@@ -1386,6 +1402,7 @@ export function isTupleIndexUnambiguous(type: ClassType, index: number) {
 // (presumably specialized) class. Optionally specializes the `Self`
 // type variables, replacing them with selfClass.
 export function partiallySpecializeType(
+    evaluator: TypeEvaluator,
     type: Type,
     contextClassType: ClassType,
     typeClassType: ClassType | undefined,
@@ -1398,7 +1415,7 @@ export function partiallySpecializeType(
     }
 
     // Partially specialize the type using the specialized class type vars.
-    const solution = buildSolutionFromSpecializedClass(contextClassType);
+    const solution = buildSolutionFromSpecializedClass(evaluator, contextClassType);
 
     if (selfClass) {
         addSolutionForSelfType(solution, contextClassType, selfClass);
@@ -1417,6 +1434,7 @@ export function partiallySpecializeType(
 
                 return {
                     methodType: partiallySpecializeType(
+                        evaluator,
                         methodInfo.methodType,
                         contextClassType,
                         typeClassType,
@@ -1627,13 +1645,14 @@ export function getContainerDepth(type: Type, recursionCount = 0) {
 }
 
 export function lookUpObjectMember(
+    evaluator: TypeEvaluator,
     objectType: ClassType,
     memberName: string,
     flags = MemberAccessFlags.Default,
     skipMroClass?: ClassType | undefined
 ): ClassMember | undefined {
     if (isClassInstance(objectType)) {
-        return lookUpClassMember(objectType, memberName, flags, skipMroClass);
+        return lookUpClassMember(evaluator, objectType, memberName, flags, skipMroClass);
     }
 
     return undefined;
@@ -1642,6 +1661,7 @@ export function lookUpObjectMember(
 // Looks up a member in a class using the multiple-inheritance rules
 // defined by Python.
 export function lookUpClassMember(
+    evaluator: TypeEvaluator,
     classType: ClassType,
     memberName: string,
     flags = MemberAccessFlags.Default,
@@ -1653,7 +1673,12 @@ export function lookUpClassMember(
     // Skip the "type" class as an optimization because it is known to not
     // define any instance variables, and it's by far the most common metaclass.
     if (metaclass && isClass(metaclass) && !ClassType.isBuiltIn(metaclass, 'type')) {
-        const metaMemberItr = getClassMemberIterator(metaclass, memberName, MemberAccessFlags.SkipClassMembers);
+        const metaMemberItr = getClassMemberIterator(
+            evaluator,
+            metaclass,
+            memberName,
+            MemberAccessFlags.SkipClassMembers
+        );
         const metaMember = metaMemberItr.next()?.value;
 
         // If the metaclass defines the member and we didn't hit an Unknown
@@ -1666,7 +1691,7 @@ export function lookUpClassMember(
         }
     }
 
-    const memberItr = getClassMemberIterator(classType, memberName, flags, skipMroClass);
+    const memberItr = getClassMemberIterator(evaluator, classType, memberName, flags, skipMroClass);
 
     return memberItr.next()?.value;
 }
@@ -1682,6 +1707,7 @@ export function lookUpClassMember(
 // If skipMroClass is defined, all MRO classes up to and including that class
 // are skipped.
 export function* getClassMemberIterator(
+    evaluator: TypeEvaluator,
     classType: ClassType | AnyType | UnknownType,
     memberName: string,
     flags = MemberAccessFlags.Default,
@@ -1707,7 +1733,7 @@ export function* getClassMemberIterator(
             classFlags = classFlags | ClassIteratorFlags.SkipTypeBaseClass;
         }
 
-        const classItr = getClassIterator(classType, classFlags, skipMroClass);
+        const classItr = getClassIterator(evaluator, classType, classFlags, skipMroClass);
 
         for (const [mroClass, specializedMroClass] of classItr) {
             if (!isInstantiableClass(mroClass)) {
@@ -1841,7 +1867,12 @@ export function isMemberReadOnly(classType: ClassType, name: string): boolean {
     return false;
 }
 
-export function* getClassIterator(classType: Type, flags = ClassIteratorFlags.Default, skipMroClass?: ClassType) {
+export function* getClassIterator(
+    evaluator: TypeEvaluator,
+    classType: Type,
+    flags = ClassIteratorFlags.Default,
+    skipMroClass?: ClassType
+) {
     if (isClass(classType)) {
         let foundSkipMroClass = skipMroClass === undefined;
 
@@ -1860,7 +1891,12 @@ export function* getClassIterator(classType: Type, flags = ClassIteratorFlags.De
 
             // If mroClass is an ancestor of classType, partially specialize
             // it in the context of classType.
-            const specializedMroClass = partiallySpecializeType(mroClass, classType, /* typeClassType */ undefined);
+            const specializedMroClass = partiallySpecializeType(
+                evaluator,
+                mroClass,
+                classType,
+                /* typeClassType */ undefined
+            );
 
             // Should we ignore members on the 'object' base class?
             if (flags & ClassIteratorFlags.SkipObjectBaseClass) {
@@ -1891,12 +1927,17 @@ export function* getClassIterator(classType: Type, flags = ClassIteratorFlags.De
     return undefined;
 }
 
-export function getClassFieldsRecursive(classType: ClassType): Map<string, ClassMember> {
+export function getClassFieldsRecursive(evaluator: TypeEvaluator, classType: ClassType): Map<string, ClassMember> {
     const memberMap = new Map<string, ClassMember>();
 
     // Evaluate the types of members from the end of the MRO to the beginning.
     ClassType.getReverseMro(classType).forEach((mroClass) => {
-        const specializedMroClass = partiallySpecializeType(mroClass, classType, /* typeClassType */ undefined);
+        const specializedMroClass = partiallySpecializeType(
+            evaluator,
+            mroClass,
+            classType,
+            /* typeClassType */ undefined
+        );
 
         if (isClass(specializedMroClass)) {
             ClassType.getSymbolTable(specializedMroClass).forEach((symbol, name) => {
@@ -2036,7 +2077,7 @@ export function specializeWithDefaultTypeArgs(type: ClassType): ClassType {
 // types. For example, if the generic type is Dict[_T1, _T2] and the
 // specialized type is Dict[str, int], it returns a map that associates
 // _T1 with str and _T2 with int.
-export function buildSolutionFromSpecializedClass(classType: ClassType): ConstraintSolution {
+export function buildSolutionFromSpecializedClass(evaluator: TypeEvaluator, classType: ClassType): ConstraintSolution {
     const typeParams = ClassType.getTypeParams(classType);
     let typeArgs: Type[] | undefined;
 
@@ -2055,10 +2096,14 @@ export function buildSolutionFromSpecializedClass(classType: ClassType): Constra
         typeArgs = classType.priv.typeArgs;
     }
 
-    return buildSolution(typeParams, typeArgs);
+    return buildSolution(evaluator, typeParams, typeArgs);
 }
 
-export function buildSolution(typeParams: TypeVarType[], typeArgs: Type[] | undefined): ConstraintSolution {
+export function buildSolution(
+    evaluator: TypeEvaluator,
+    typeParams: TypeVarType[],
+    typeArgs: Type[] | undefined
+): ConstraintSolution {
     const solution = new ConstraintSolution();
 
     if (!typeArgs) {
@@ -2067,7 +2112,37 @@ export function buildSolution(typeParams: TypeVarType[], typeArgs: Type[] | unde
 
     typeParams.forEach((typeParam, index) => {
         if (index < typeArgs.length) {
-            solution.setType(typeParam, typeArgs[index]);
+            const typeArg = typeArgs[index];
+            solution.setType(typeParam, typeArg);
+            if (isTypeVarTuple(typeParam)) {
+                // For mapped type var tuple, we need to infer the unmapped typeArg
+                // Assume typeArg is mapped and deconstruct typeArg
+                // The arg of the deconsrtuction is the unmapped typeArg
+                if (MyPyrightExtensions.isMappedType(typeParam)) {
+                    const { arg } = MyPyrightExtensions.deconstructMappedType1(
+                        evaluator,
+                        MyPyrightExtensions.isMappedType(typeArg)
+                            ? typeArg
+                            : MyPyrightExtensions.setFlagMapped(TypeBase.cloneType(typeArg))
+                    );
+                    if (arg) {
+                        solution.setType(MyPyrightExtensions.unsetFlagMapped(TypeBase.cloneType(typeParam)), arg);
+                    }
+                } else if (typeParam.shared.mappedBoundType) {
+                    // If the type var tuple is not mapped, but it has a mapped bound,
+                    // we need to infer the mapped typeArg.
+                    // Deconstruct the mapped bound to get the map.
+                    // Then map typeArg using that map.
+                    const { map } = MyPyrightExtensions.deconstructMappedType1(
+                        evaluator,
+                        typeParam.shared.mappedBoundType
+                    );
+                    solution.setType(
+                        MyPyrightExtensions.setFlagMapped(TypeBase.cloneType(typeParam)),
+                        MyPyrightExtensions.convertToMappedType(evaluator, map, typeArg)
+                    );
+                }
+            }
         }
     });
 
@@ -2075,7 +2150,7 @@ export function buildSolution(typeParams: TypeVarType[], typeArgs: Type[] | unde
 }
 
 // Determines the specialized base class type that srcType derives from.
-export function specializeForBaseClass(srcType: ClassType, baseClass: ClassType): ClassType {
+export function specializeForBaseClass(evaluator: TypeEvaluator, srcType: ClassType, baseClass: ClassType): ClassType {
     const typeParams = ClassType.getTypeParams(baseClass);
 
     // If there are no type parameters for the specified base class,
@@ -2084,7 +2159,7 @@ export function specializeForBaseClass(srcType: ClassType, baseClass: ClassType)
         return baseClass;
     }
 
-    const solution = buildSolutionFromSpecializedClass(srcType);
+    const solution = buildSolutionFromSpecializedClass(evaluator, srcType);
     const specializedType = applySolvedTypeVars(baseClass, solution);
     assert(isInstantiableClass(specializedType));
     return specializedType as ClassType;
@@ -2949,7 +3024,7 @@ export function isVarianceOfTypeArgCompatible(type: Type, typeParamVariance: Var
 // have already been filled in. The algorithm for computing MRO is described
 // here: https://www.python.org/download/releases/2.3/mro/. It returns true
 // if an MRO was possible, false otherwise.
-export function computeMroLinearization(classType: ClassType): boolean {
+export function computeMroLinearization(evaluator: TypeEvaluator, classType: ClassType): boolean {
     let isMroFound = true;
 
     // Clear out any existing MRO information.
@@ -2992,7 +3067,7 @@ export function computeMroLinearization(classType: ClassType): boolean {
 
     filteredBaseClasses.forEach((baseClass) => {
         if (isInstantiableClass(baseClass)) {
-            const solution = buildSolutionFromSpecializedClass(baseClass);
+            const solution = buildSolutionFromSpecializedClass(evaluator, baseClass);
             classListsToMerge.push(
                 baseClass.shared.mro.map((mroClass) => {
                     return applySolvedTypeVars(mroClass, solution);
@@ -3005,13 +3080,13 @@ export function computeMroLinearization(classType: ClassType): boolean {
 
     classListsToMerge.push(
         filteredBaseClasses.map((baseClass) => {
-            const solution = buildSolutionFromSpecializedClass(classType);
+            const solution = buildSolutionFromSpecializedClass(evaluator, classType);
             return applySolvedTypeVars(baseClass, solution);
         })
     );
 
     // The first class in the MRO is the class itself.
-    const solution = buildSolutionFromSpecializedClass(classType);
+    const solution = buildSolutionFromSpecializedClass(evaluator, classType);
     let specializedClassType = applySolvedTypeVars(classType, solution);
     if (!isClass(specializedClassType) && !isAnyOrUnknown(specializedClassType)) {
         specializedClassType = UnknownType.create();

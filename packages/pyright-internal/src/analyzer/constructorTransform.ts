@@ -72,7 +72,12 @@ function applyPartialTransform(
         return undefined;
     }
 
-    const callMemberResult = lookUpObjectMember(result.returnType, '__call__', MemberAccessFlags.SkipInstanceMembers);
+    const callMemberResult = lookUpObjectMember(
+        evaluator,
+        result.returnType,
+        '__call__',
+        MemberAccessFlags.SkipInstanceMembers
+    );
     if (!callMemberResult || !isTypeSame(convertToInstance(callMemberResult.classType), result.returnType)) {
         return undefined;
     }
@@ -216,7 +221,7 @@ function applyPartialTransformToFunction(
     // Create a map to track which parameters have supplied arguments.
     const paramMap = new Map<string, boolean>();
 
-    const paramListDetails = getParamListDetails(origFunctionType);
+    const paramListDetails = getParamListDetails(evaluator, origFunctionType);
 
     // Verify the types of the provided arguments.
     let argumentErrors = false;

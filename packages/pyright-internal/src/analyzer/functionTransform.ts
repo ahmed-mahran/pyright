@@ -65,7 +65,12 @@ function applyTotalOrderingTransform(
     // Verify that the class has at least one of the required functions.
     let firstMemberFound: ClassMember | undefined;
     const missingMethods = orderingMethods.filter((methodName) => {
-        const memberInfo = lookUpObjectMember(instanceType, methodName, MemberAccessFlags.SkipInstanceMembers);
+        const memberInfo = lookUpObjectMember(
+            evaluator,
+            instanceType,
+            methodName,
+            MemberAccessFlags.SkipInstanceMembers
+        );
         if (memberInfo && !firstMemberFound) {
             firstMemberFound = memberInfo;
         }

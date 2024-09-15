@@ -101,7 +101,7 @@ export function createEnumType(
         enumClass.shared.effectiveMetaclass
     );
     classType.shared.baseClasses.push(enumClass);
-    computeMroLinearization(classType);
+    computeMroLinearization(evaluator, classType);
 
     const classFields = ClassType.getSymbolTable(classType);
     classFields.set(
@@ -312,7 +312,7 @@ export function transformTypeForEnumMember(
         return undefined;
     }
 
-    const memberInfo = lookUpClassMember(classType, memberName);
+    const memberInfo = lookUpClassMember(evaluator, classType, memberName);
     if (!memberInfo || !isClass(memberInfo.classType) || !ClassType.isEnumClass(memberInfo.classType)) {
         return undefined;
     }
@@ -528,6 +528,7 @@ export function getEnumDeclaredValueType(
     let valueType: Type | undefined;
 
     const declaredValueMember = lookUpClassMember(
+        evaluator,
         classType,
         '_value_',
         declaredTypesOnly ? MemberAccessFlags.DeclaredTypesOnly : MemberAccessFlags.Default
@@ -573,7 +574,7 @@ export function getTypeOfEnumMember(
     if (memberName === 'name' || memberName === '_name_') {
         // Does the class explicitly override this member? Or it it using the
         // standard behavior provided by the "Enum" class?
-        const memberInfo = lookUpClassMember(classType, memberName);
+        const memberInfo = lookUpClassMember(evaluator, classType, memberName);
         if (memberInfo && isClass(memberInfo.classType) && !ClassType.isBuiltIn(memberInfo.classType, 'Enum')) {
             return undefined;
         }
@@ -616,7 +617,7 @@ export function getTypeOfEnumMember(
         // Does the class explicitly override this member? Or it it using the
         // standard behavior provided by the "Enum" class and other built-in
         // subclasses like "StrEnum" and "IntEnum"?
-        const memberInfo = lookUpClassMember(classType, memberName);
+        const memberInfo = lookUpClassMember(evaluator, classType, memberName);
         if (memberInfo && isClass(memberInfo.classType) && !ClassType.isBuiltIn(memberInfo.classType)) {
             return undefined;
         }
@@ -635,8 +636,8 @@ export function getTypeOfEnumMember(
         // it may implement some magic that computes different values for
         // the "_value_" attribute. If we see a customer __new__ or __init__,
         // we'll assume the value type is what we computed above, or Any.
-        const newMember = lookUpClassMember(classType, '__new__', MemberAccessFlags.SkipObjectBaseClass);
-        const initMember = lookUpClassMember(classType, '__init__', MemberAccessFlags.SkipObjectBaseClass);
+        const newMember = lookUpClassMember(evaluator, classType, '__new__', MemberAccessFlags.SkipObjectBaseClass);
+        const initMember = lookUpClassMember(evaluator, classType, '__init__', MemberAccessFlags.SkipObjectBaseClass);
 
         if (newMember && isClass(newMember.classType) && !ClassType.isBuiltIn(newMember.classType)) {
             return { type: valueType ?? AnyType.create(), isIncomplete };

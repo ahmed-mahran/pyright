@@ -118,7 +118,7 @@ export function createTypedDictType(
         typedDictClass.shared.effectiveMetaclass
     );
     classType.shared.baseClasses.push(typedDictClass);
-    computeMroLinearization(classType);
+    computeMroLinearization(evaluator, classType);
 
     const classFields = ClassType.getSymbolTable(classType);
     classFields.set(
@@ -764,7 +764,7 @@ export function getTypedDictMembersForClass(
         classType.shared.typedDictEntries = entries;
     }
 
-    const solution = buildSolutionFromSpecializedClass(classType);
+    const solution = buildSolutionFromSpecializedClass(evaluator, classType);
 
     // Create a specialized copy of the entries so the caller can mutate them.
     const entries = new Map<string, TypedDictEntry>();
@@ -973,6 +973,7 @@ function getTypedDictMembersForClassRecursive(
     classType.shared.baseClasses.forEach((baseClassType) => {
         if (isInstantiableClass(baseClassType) && ClassType.isTypedDictClass(baseClassType)) {
             const specializedBaseClassType = partiallySpecializeType(
+                evaluator,
                 baseClassType,
                 classType,
                 evaluator.getTypeClassType()
@@ -985,7 +986,7 @@ function getTypedDictMembersForClassRecursive(
         }
     });
 
-    const solution = buildSolutionFromSpecializedClass(classType);
+    const solution = buildSolutionFromSpecializedClass(evaluator, classType);
 
     // Add any new typed dict entries from this class.
     ClassType.getSymbolTable(classType).forEach((symbol, name) => {

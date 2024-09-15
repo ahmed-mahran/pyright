@@ -140,7 +140,7 @@ export function synthesizeDataClassMethods(
     const localDataClassEntries: DataClassEntry[] = [];
     const fullDataClassEntries: DataClassEntry[] = [];
     const namedTupleEntries = new Set<string>();
-    const allAncestorsKnown = addInheritedDataClassEntries(classType, fullDataClassEntries);
+    const allAncestorsKnown = addInheritedDataClassEntries(evaluator, classType, fullDataClassEntries);
 
     if (!allAncestorsKnown) {
         // If one or more ancestor classes have an unknown type, we cannot
@@ -717,13 +717,14 @@ export function synthesizeDataClassMethods(
     // the specialized entry types.
     if (
         updateNamedTupleBaseClass(
+            evaluator,
             classType,
             fullDataClassEntries.map((entry) => entry.type),
             /* isTypeArgExplicit */ true
         )
     ) {
         // Recompute the MRO based on the updated NamedTuple base class.
-        computeMroLinearization(classType);
+        computeMroLinearization(evaluator, classType);
     }
 }
 
@@ -953,7 +954,7 @@ function getDescriptorForConverterField(
         isInstantiableClass(typeMetaclass) ? typeMetaclass : UnknownType.create()
     );
     descriptorClass.shared.baseClasses.push(evaluator.getBuiltInType(dataclassNode, 'object'));
-    computeMroLinearization(descriptorClass);
+    computeMroLinearization(evaluator, descriptorClass);
 
     const fields = ClassType.getSymbolTable(descriptorClass);
     const selfType = synthesizeTypeVarForSelfCls(descriptorClass, /* isClsParam */ false);
@@ -1020,12 +1021,16 @@ function transformDescriptorType(evaluator: TypeEvaluator, type: Type): Type {
 // the specified class. These entries must be unique and in reverse-MRO
 // order. Returns true if all of the class types in the hierarchy are
 // known, false if one or more are unknown.
-export function addInheritedDataClassEntries(classType: ClassType, entries: DataClassEntry[]) {
+export function addInheritedDataClassEntries(
+    evaluator: TypeEvaluator,
+    classType: ClassType,
+    entries: DataClassEntry[]
+) {
     let allAncestorsAreKnown = true;
 
     ClassType.getReverseMro(classType).forEach((mroClass) => {
         if (isInstantiableClass(mroClass)) {
-            const solution = buildSolutionFromSpecializedClass(mroClass);
+            const solution = buildSolutionFromSpecializedClass(evaluator, mroClass);
             const dataClassEntries = ClassType.getDataClassEntries(mroClass);
 
             // Add the entries to the end of the list, replacing same-named

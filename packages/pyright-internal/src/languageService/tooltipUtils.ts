@@ -181,7 +181,7 @@ export function getFunctionDocStringFromType(type: FunctionType, sourceMapper: S
     const enclosingClass = decl ? ParseTreeUtils.getEnclosingClass(decl.node) : undefined;
     const classResults = enclosingClass ? evaluator.getTypeOfClass(enclosingClass) : undefined;
 
-    return getFunctionDocStringInherited(type, decl, sourceMapper, classResults?.classType);
+    return getFunctionDocStringInherited(evaluator, type, decl, sourceMapper, classResults?.classType);
 }
 
 export function getOverloadedDocStringsFromType(
@@ -414,7 +414,7 @@ export function getClassAndConstructorTypes(node: NameNode, evaluator: TypeEvalu
 
     // Try to get the `__init__` method first because it typically has more type information than `__new__`.
     // Don't exclude `object.__init__` since in the plain case we want to show Foo().
-    const initMember = lookUpClassMember(classType, '__init__', MemberAccessFlags.SkipInstanceMembers);
+    const initMember = lookUpClassMember(evaluator, classType, '__init__', MemberAccessFlags.SkipInstanceMembers);
 
     if (initMember) {
         const functionType = evaluator.getTypeOfMember(initMember);
@@ -433,6 +433,7 @@ export function getClassAndConstructorTypes(node: NameNode, evaluator: TypeEvalu
             (FunctionType.hasDefaultParams(methodType) || methodType.shared.parameters.length === 0))
     ) {
         const newMember = lookUpClassMember(
+            evaluator,
             classType,
             '__new__',
             MemberAccessFlags.SkipObjectBaseClass | MemberAccessFlags.SkipInstanceMembers

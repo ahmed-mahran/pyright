@@ -8,6 +8,7 @@
 
 import { ParamCategory } from '../parser/parseNodes';
 import { isDunderName } from './symbolNameUtils';
+import { TypeEvaluator } from './typeEvaluatorTypes';
 import {
     ClassType,
     FunctionParam,
@@ -74,7 +75,7 @@ export interface ParamListDetails {
 // Examines the input parameters within a function signature and creates a
 // "virtual list" of parameters, stripping out any markers and expanding
 // any *args with unpacked tuples.
-export function getParamListDetails(type: FunctionType): ParamListDetails {
+export function getParamListDetails(evaluator: TypeEvaluator, type: FunctionType): ParamListDetails {
     const result: ParamListDetails = {
         firstPositionOrKeywordIndex: 0,
         positionParamCount: 0,
@@ -242,6 +243,7 @@ export function getParamListDetails(type: FunctionType): ParamListDetails {
                 const typedDictType = paramType;
                 paramType.shared.typedDictEntries.knownItems.forEach((entry, name) => {
                     const specializedParamType = partiallySpecializeType(
+                        evaluator,
                         entry.valueType,
                         typedDictType,
                         /* typeClassType */ undefined

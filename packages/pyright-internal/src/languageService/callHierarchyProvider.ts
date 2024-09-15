@@ -172,6 +172,7 @@ export class CallHierarchyProvider {
                 // case because we don't want to find an inherited __init__
                 // method defined in a different module.
                 const initMethodMember = lookUpClassMember(
+                    this._evaluator,
                     classType,
                     '__init__',
                     MemberAccessFlags.SkipInstanceMembers |
@@ -348,7 +349,7 @@ class FindOutgoingCallTreeWalker extends ParseTreeWalker {
                     return;
                 }
 
-                const memberInfo = lookUpObjectMember(baseType, node.d.member.d.value);
+                const memberInfo = lookUpObjectMember(this._evaluator, baseType, node.d.member.d.value);
                 if (!memberInfo) {
                     return;
                 }
@@ -507,7 +508,7 @@ class FindIncomingCallTreeWalker extends ParseTreeWalker {
                         return;
                     }
 
-                    const memberInfo = lookUpObjectMember(baseType, node.d.member.d.value);
+                    const memberInfo = lookUpObjectMember(this._evaluator, baseType, node.d.member.d.value);
                     if (!memberInfo) {
                         return;
                     }

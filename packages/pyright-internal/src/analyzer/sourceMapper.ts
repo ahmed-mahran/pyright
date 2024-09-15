@@ -253,7 +253,7 @@ export class SourceMapper {
                 continue;
             }
 
-            const member = lookUpClassMember(classResults.classType, memberName);
+            const member = lookUpClassMember(this._evaluator, classResults.classType, memberName);
             if (member) {
                 for (const decl of member.symbol.getDeclarations()) {
                     declAdder(decl, recursiveDeclCache, result);

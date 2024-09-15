@@ -1652,6 +1652,7 @@ export class CompletionProvider {
 
         const classVariableName = ((parseNode.parent as TypeAnnotationNode).d.valueExpr as NameNode).d.value;
         const classMember = lookUpClassMember(
+            this.evaluator,
             classResults.classType,
             classVariableName,
             MemberAccessFlags.SkipInstanceMembers | MemberAccessFlags.SkipOriginalClass
@@ -2871,7 +2872,7 @@ export class CompletionProvider {
     }
 
     private _addNamedParametersToMap(type: FunctionType, names: Set<string>) {
-        const paramDetails = getParamListDetails(type);
+        const paramDetails = getParamListDetails(this.evaluator, type);
 
         paramDetails.params.forEach((paramInfo) => {
             if (paramInfo.param.name && paramInfo.kind !== ParamKind.Positional) {

@@ -417,7 +417,7 @@ export class Checker extends ParseTreeWalker {
             let sawParamSpecArgs = false;
 
             const keywordNames = new Set<string>();
-            const paramDetails = getParamListDetails(functionTypeResult.functionType);
+            const paramDetails = getParamListDetails(this._evaluator, functionTypeResult.functionType);
 
             // Report any unknown or missing parameter types.
             node.d.params.forEach((param, index) => {
@@ -1208,7 +1208,7 @@ export class Checker extends ParseTreeWalker {
         const baseType = this._evaluator.getType(node.d.leftExpr);
         if (baseType) {
             doForEachSubtype(baseType, (subtype) => {
-                const tupleType = getSpecializedTupleType(subtype);
+                const tupleType = getSpecializedTupleType(this._evaluator, subtype);
 
                 if (!isClassInstance(subtype) || !tupleType?.priv.tupleTypeArgs || isUnboundedTupleClass(tupleType)) {
                     return;
@@ -2218,7 +2218,7 @@ export class Checker extends ParseTreeWalker {
             // Does the class have an operator overload for eq?
             const metaclass = leftType.shared.effectiveMetaclass;
             if (metaclass && isClass(metaclass)) {
-                if (lookUpClassMember(metaclass, '__eq__', MemberAccessFlags.SkipObjectBaseClass)) {
+                if (lookUpClassMember(this._evaluator, metaclass, '__eq__', MemberAccessFlags.SkipObjectBaseClass)) {
                     return true;
                 }
             }
@@ -2247,6 +2247,7 @@ export class Checker extends ParseTreeWalker {
 
             // Does the class have an operator overload for eq?
             const eqMethod = lookUpClassMember(
+                this._evaluator,
                 ClassType.cloneAsInstantiable(leftType),
                 '__eq__',
                 MemberAccessFlags.SkipObjectBaseClass
@@ -3810,7 +3811,7 @@ export class Checker extends ParseTreeWalker {
             return;
         }
         arg0Type = mapSubtypes(arg0Type, (subtype) => {
-            return transformPossibleRecursiveTypeAlias(subtype);
+            return transformPossibleRecursiveTypeAlias(this._evaluator, subtype);
         });
 
         arg0Type = this._evaluator.expandPromotionTypes(node, arg0Type);
@@ -3977,7 +3978,7 @@ export class Checker extends ParseTreeWalker {
 
         doForEachSubtype(type, (subtype) => {
             subtype = this._evaluator.makeTopLevelTypeVarsConcrete(subtype);
-            subtype = transformPossibleRecursiveTypeAlias(subtype);
+            subtype = transformPossibleRecursiveTypeAlias(this._evaluator, subtype);
 
             if (subtype.props?.specialForm && ClassType.isBuiltIn(subtype.props.specialForm, 'TypeAliasType')) {
                 diag.addMessage(LocAddendum.typeAliasInstanceCheck());
@@ -4841,7 +4842,12 @@ export class Checker extends ParseTreeWalker {
     // as Final in parent classes.
     private _validateFinalMemberOverrides(classType: ClassType) {
         ClassType.getSymbolTable(classType).forEach((localSymbol, name) => {
-            const parentSymbol = lookUpClassMember(classType, name, MemberAccessFlags.SkipOriginalClass);
+            const parentSymbol = lookUpClassMember(
+                this._evaluator,
+                classType,
+                name,
+                MemberAccessFlags.SkipOriginalClass
+            );
 
             if (parentSymbol && isInstantiableClass(parentSymbol.classType) && !SymbolNameUtils.isPrivateName(name)) {
                 // Did the parent class explicitly declare the variable as final?
@@ -5056,6 +5062,7 @@ export class Checker extends ParseTreeWalker {
         }
 
         const postInitMember = lookUpClassMember(
+            this._evaluator,
             classType,
             '__post_init__',
             MemberAccessFlags.SkipBaseClasses | MemberAccessFlags.DeclaredTypesOnly
@@ -5092,7 +5099,7 @@ export class Checker extends ParseTreeWalker {
             return;
         }
 
-        const paramListDetails = getParamListDetails(postInitType);
+        const paramListDetails = getParamListDetails(this._evaluator, postInitType);
         // If there is an *args or **kwargs parameter or a keyword-only separator,
         // don't bother checking.
         if (
@@ -5243,7 +5250,7 @@ export class Checker extends ParseTreeWalker {
         // ones are initialized by the synthesized __init__ method.
         const dataClassEntries: DataClassEntry[] = [];
         if (ClassType.isDataClass(classType)) {
-            addInheritedDataClassEntries(classType, dataClassEntries);
+            addInheritedDataClassEntries(this._evaluator, classType, dataClassEntries);
         }
 
         ClassType.getSymbolTable(classType).forEach((localSymbol, name) => {
@@ -5305,7 +5312,12 @@ export class Checker extends ParseTreeWalker {
 
             // If the symbol is declared by its parent, we can assume it
             // is initialized there.
-            const parentSymbol = lookUpClassMember(classType, name, MemberAccessFlags.SkipOriginalClass);
+            const parentSymbol = lookUpClassMember(
+                this._evaluator,
+                classType,
+                name,
+                MemberAccessFlags.SkipOriginalClass
+            );
             if (parentSymbol) {
                 return;
             }
@@ -5662,7 +5674,7 @@ export class Checker extends ParseTreeWalker {
         const diagAddendum = new DiagnosticAddendum();
 
         for (const baseClass of filteredBaseClasses) {
-            const solution = buildSolutionFromSpecializedClass(baseClass);
+            const solution = buildSolutionFromSpecializedClass(this._evaluator, baseClass);
 
             for (const baseClassMroClass of baseClass.shared.mro) {
                 // There's no need to check for conflicts if this class isn't generic.
@@ -5767,10 +5779,10 @@ export class Checker extends ParseTreeWalker {
             }
 
             // Retrieve all of the specialized symbols from the base class and its ancestors.
-            return getClassFieldsRecursive(specializedBaseClass);
+            return getClassFieldsRecursive(this._evaluator, specializedBaseClass);
         });
 
-        const childClassSymbolMap = getClassFieldsRecursive(classType);
+        const childClassSymbolMap = getClassFieldsRecursive(this._evaluator, classType);
 
         for (let symbolMapBaseIndex = 1; symbolMapBaseIndex < baseClassSymbolMaps.length; symbolMapBaseIndex++) {
             const baseSymbolMap = baseClassSymbolMaps[symbolMapBaseIndex];
@@ -5834,6 +5846,7 @@ export class Checker extends ParseTreeWalker {
 
         let overriddenType = this._evaluator.getEffectiveTypeOfSymbol(overriddenClassAndSymbol.symbol);
         overriddenType = partiallySpecializeType(
+            this._evaluator,
             overriddenType,
             overriddenClassAndSymbol.classType,
             this._evaluator.getTypeClassType()
@@ -5842,6 +5855,7 @@ export class Checker extends ParseTreeWalker {
         const overrideSymbol = overrideClassAndSymbol.symbol;
         let overrideType = this._evaluator.getEffectiveTypeOfSymbol(overrideSymbol);
         overrideType = partiallySpecializeType(
+            this._evaluator,
             overrideType,
             overrideClassAndSymbol.classType,
             this._evaluator.getTypeClassType()
@@ -6080,6 +6094,7 @@ export class Checker extends ParseTreeWalker {
             // Is the method present on the base class but missing in the subclass?
             if (baseClassPropMethod) {
                 const baseClassMethodType = partiallySpecializeType(
+                    this._evaluator,
                     baseClassPropMethod,
                     overriddenClassType,
                     this._evaluator.getTypeClassType()
@@ -6122,6 +6137,7 @@ export class Checker extends ParseTreeWalker {
                         }
                     } else {
                         const subclassMethodType = partiallySpecializeType(
+                            this._evaluator,
                             subclassPropMethod,
                             overrideClassType,
                             this._evaluator.getTypeClassType()
@@ -6311,7 +6327,7 @@ export class Checker extends ParseTreeWalker {
                 /* allowNarrowed */ false
             );
 
-            const solution = buildSolutionFromSpecializedClass(baseClass);
+            const solution = buildSolutionFromSpecializedClass(this._evaluator, baseClass);
 
             const baseExtraItemsType = baseTypedDictEntries.extraItems
                 ? applySolvedTypeVars(baseTypedDictEntries.extraItems.valueType, solution)
@@ -6447,7 +6463,12 @@ export class Checker extends ParseTreeWalker {
                 }
 
                 assert(isClass(mroBaseClass));
-                const baseClassAndSymbol = lookUpClassMember(mroBaseClass, name, MemberAccessFlags.Default);
+                const baseClassAndSymbol = lookUpClassMember(
+                    this._evaluator,
+                    mroBaseClass,
+                    name,
+                    MemberAccessFlags.Default
+                );
                 if (!baseClassAndSymbol) {
                     continue;
                 }
@@ -6600,6 +6621,7 @@ export class Checker extends ParseTreeWalker {
         const childClassSelf = ClassType.cloneAsInstance(selfSpecializeClass(childClassType));
 
         let baseType = partiallySpecializeType(
+            this._evaluator,
             this._evaluator.getEffectiveTypeOfSymbol(baseClassAndSymbol.symbol),
             baseClass,
             this._evaluator.getTypeClassType(),
@@ -6607,6 +6629,7 @@ export class Checker extends ParseTreeWalker {
         );
 
         overrideType = partiallySpecializeType(
+            this._evaluator,
             overrideType,
             childClassType,
             this._evaluator.getTypeClassType(),
@@ -6974,6 +6997,7 @@ export class Checker extends ParseTreeWalker {
             // Is the method present on the base class but missing in the subclass?
             if (baseClassPropMethod) {
                 const baseClassMethodType = partiallySpecializeType(
+                    this._evaluator,
                     baseClassPropMethod,
                     baseClassType,
                     this._evaluator.getTypeClassType()
@@ -7008,6 +7032,7 @@ export class Checker extends ParseTreeWalker {
                         }
                     } else {
                         const subclassMethodType = partiallySpecializeType(
+                            this._evaluator,
                             subclassPropMethod,
                             childClassType,
                             this._evaluator.getTypeClassType()
@@ -7207,7 +7232,7 @@ export class Checker extends ParseTreeWalker {
             effectiveFlags |= MemberAccessFlags.SkipObjectBaseClass;
         }
 
-        const methodMember = lookUpClassMember(classType, methodType.shared.name, effectiveFlags);
+        const methodMember = lookUpClassMember(this._evaluator, classType, methodType.shared.name, effectiveFlags);
         if (!methodMember) {
             return;
         }

@@ -203,7 +203,7 @@ function narrowTypeBasedOnSequencePattern(
     pattern: PatternSequenceNode,
     isPositiveTest: boolean
 ): Type {
-    type = transformPossibleRecursiveTypeAlias(type);
+    type = transformPossibleRecursiveTypeAlias(evaluator, type);
     let sequenceInfo = getSequencePatternInfo(evaluator, pattern, type);
 
     // Further narrow based on pattern entry types.
@@ -438,7 +438,7 @@ function narrowTypeBasedOnMappingPattern(
     pattern: PatternMappingNode,
     isPositiveTest: boolean
 ): Type {
-    type = transformPossibleRecursiveTypeAlias(type);
+    type = transformPossibleRecursiveTypeAlias(evaluator, type);
 
     if (!isPositiveTest) {
         // Handle the case where the pattern consists only of a "**x" entry.
@@ -622,7 +622,7 @@ function narrowTypeBasedOnMappingPattern(
 // Looks up the "__match_args__" class member to determine the names of
 // the attributes used for class pattern matching.
 function getPositionalMatchArgNames(evaluator: TypeEvaluator, type: ClassType): string[] {
-    const matchArgsMemberInfo = lookUpClassMember(type, '__match_args__');
+    const matchArgsMemberInfo = lookUpClassMember(evaluator, type, '__match_args__');
     if (matchArgsMemberInfo) {
         const matchArgsType = evaluator.getTypeOfMember(matchArgsMemberInfo);
         if (
@@ -1020,13 +1020,13 @@ function narrowTypeBasedOnClassPattern(
 
 // Some built-in classes are treated as special cases for the class pattern
 // if a positional argument is used.
-function isClassSpecialCaseForClassPattern(classType: ClassType) {
+function isClassSpecialCaseForClassPattern(evaluator: TypeEvaluator, classType: ClassType) {
     if (classPatternSpecialCases.some((className) => classType.shared.fullName === className)) {
         return true;
     }
 
     // If the class supplies its own `__match_args__`, it's not a special case.
-    const matchArgsMemberInfo = lookUpClassMember(classType, '__match_args__');
+    const matchArgsMemberInfo = lookUpClassMember(evaluator, classType, '__match_args__');
     if (matchArgsMemberInfo) {
         return false;
     }
@@ -1074,11 +1074,11 @@ function narrowTypeOfClassPatternArg(
     let selfForPatternType = matchType;
 
     if (!arg.d.name && isClass(matchType) && argIndex === 0) {
-        if (isClassSpecialCaseForClassPattern(matchType)) {
+        if (isClassSpecialCaseForClassPattern(evaluator, matchType)) {
             useSelfForPattern = true;
         } else if (positionalArgNames.length === 0) {
             matchType.shared.mro.forEach((mroClass) => {
-                if (isClass(mroClass) && isClassSpecialCaseForClassPattern(mroClass)) {
+                if (isClass(mroClass) && isClassSpecialCaseForClassPattern(evaluator, mroClass)) {
                     selfForPatternType = mroClass;
                     useSelfForPattern = true;
                 }
@@ -1356,6 +1356,7 @@ function getSequencePatternInfo(
 
             if (mroClassToSpecialize) {
                 const specializedSequence = partiallySpecializeType(
+                    evaluator,
                     mroClassToSpecialize,
                     concreteSubtype,
                     evaluator.getTypeClassType()
@@ -1948,7 +1949,7 @@ export function validateClassPattern(evaluator: TypeEvaluator, pattern: PatternC
             );
         }
     } else {
-        const isBuiltIn = isClassSpecialCaseForClassPattern(exprType);
+        const isBuiltIn = isClassSpecialCaseForClassPattern(evaluator, exprType);
 
         // If it's a special-case builtin class, only positional arguments are allowed.
         if (isBuiltIn) {

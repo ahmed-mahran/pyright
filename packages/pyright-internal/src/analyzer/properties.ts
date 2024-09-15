@@ -73,7 +73,7 @@ export function createProperty(
     propertyClass.shared.typeVarScopeId = decoratorType.shared.typeVarScopeId;
     const objectType = evaluator.getBuiltInType(decoratorNode, 'object');
     propertyClass.shared.baseClasses.push(isInstantiableClass(objectType) ? objectType : UnknownType.create());
-    computeMroLinearization(propertyClass);
+    computeMroLinearization(evaluator, propertyClass);
 
     // Clone the symbol table of the old class type.
     const fields = ClassType.getSymbolTable(propertyClass);
@@ -174,7 +174,7 @@ export function clonePropertyWithSetter(
     propertyClass.shared.typeVarScopeId = classType.shared.typeVarScopeId;
     const objectType = evaluator.getBuiltInType(errorNode, 'object');
     propertyClass.shared.baseClasses.push(isInstantiableClass(objectType) ? objectType : UnknownType.create());
-    computeMroLinearization(propertyClass);
+    computeMroLinearization(evaluator, propertyClass);
 
     propertyClass.priv.fgetInfo = classType.priv.fgetInfo;
     propertyClass.priv.fdelInfo = classType.priv.fdelInfo;
@@ -233,7 +233,7 @@ export function clonePropertyWithDeleter(
     propertyClass.shared.typeVarScopeId = classType.shared.typeVarScopeId;
     const objectType = evaluator.getBuiltInType(errorNode, 'object');
     propertyClass.shared.baseClasses.push(isInstantiableClass(objectType) ? objectType : UnknownType.create());
-    computeMroLinearization(propertyClass);
+    computeMroLinearization(evaluator, propertyClass);
 
     propertyClass.priv.fgetInfo = classType.priv.fgetInfo;
     propertyClass.priv.fsetInfo = classType.priv.fsetInfo;

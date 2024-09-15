@@ -985,7 +985,7 @@ function narrowTypeForTruthiness(evaluator: TypeEvaluator, type: Type, isPositiv
 // I is an integer and a is a union of Tuples (or subtypes thereof) with known lengths and entry types.
 function narrowTupleTypeForIsNone(evaluator: TypeEvaluator, type: Type, isPositiveTest: boolean, indexValue: number) {
     return evaluator.mapSubtypesExpandTypeVars(type, /* options */ undefined, (subtype) => {
-        const tupleType = getSpecializedTupleType(subtype);
+        const tupleType = getSpecializedTupleType(evaluator, subtype);
         if (!tupleType || isUnboundedTupleClass(tupleType) || !tupleType.priv.tupleTypeArgs) {
             return subtype;
         }
@@ -1014,7 +1014,7 @@ function narrowTupleTypeForIsNone(evaluator: TypeEvaluator, type: Type, isPositi
 // Handle type narrowing for expressions of the form "x is None" and "x is not None".
 function narrowTypeForIsNone(evaluator: TypeEvaluator, type: Type, isPositiveTest: boolean) {
     const expandedType = mapSubtypes(type, (subtype) => {
-        return transformPossibleRecursiveTypeAlias(subtype);
+        return transformPossibleRecursiveTypeAlias(evaluator, subtype);
     });
 
     let resultIncludesNoneSubtype = false;
@@ -1086,7 +1086,7 @@ function narrowTypeForIsNone(evaluator: TypeEvaluator, type: Type, isPositiveTes
 // Handle type narrowing for expressions of the form "x is ..." and "x is not ...".
 function narrowTypeForIsEllipsis(evaluator: TypeEvaluator, node: ExpressionNode, type: Type, isPositiveTest: boolean) {
     const expandedType = mapSubtypes(type, (subtype) => {
-        return transformPossibleRecursiveTypeAlias(subtype);
+        return transformPossibleRecursiveTypeAlias(evaluator, subtype);
     });
 
     const ellipsisType =
@@ -1302,7 +1302,7 @@ function narrowTypeForInstance(
     errorNode: ExpressionNode
 ): Type {
     let expandedTypes = mapSubtypes(type, (subtype) => {
-        return transformPossibleRecursiveTypeAlias(subtype);
+        return transformPossibleRecursiveTypeAlias(evaluator, subtype);
     });
 
     expandedTypes = evaluator.expandPromotionTypes(errorNode, expandedTypes);
@@ -1572,6 +1572,7 @@ function narrowTypeForInstance(
                         isCallable = true;
                     } else {
                         isCallable = !!lookUpClassMember(
+                            evaluator,
                             concreteVarType,
                             '__call__',
                             MemberAccessFlags.SkipInstanceMembers
@@ -1615,7 +1616,7 @@ function narrowTypeForInstance(
                         concreteVarType.shared.docString
                     );
                     newClassType.shared.baseClasses = [concreteVarType];
-                    computeMroLinearization(newClassType);
+                    computeMroLinearization(evaluator, newClassType);
 
                     newClassType = addConditionToType(newClassType, concreteVarType.props?.condition);
 
@@ -2219,9 +2220,9 @@ export function narrowTypeForDiscriminatedLiteralFieldComparison(
         let memberInfo: ClassMember | undefined;
 
         if (isClassInstance(subtype)) {
-            memberInfo = lookUpObjectMember(subtype, memberName);
+            memberInfo = lookUpObjectMember(evaluator, subtype, memberName);
         } else if (isInstantiableClass(subtype)) {
-            memberInfo = lookUpClassMember(subtype, memberName);
+            memberInfo = lookUpClassMember(evaluator, subtype, memberName);
         }
 
         if (memberInfo && memberInfo.isTypeDeclared) {
@@ -2266,9 +2267,9 @@ function narrowTypeForDiscriminatedFieldNoneComparison(
     return mapSubtypes(referenceType, (subtype) => {
         let memberInfo: ClassMember | undefined;
         if (isClassInstance(subtype)) {
-            memberInfo = lookUpObjectMember(subtype, memberName);
+            memberInfo = lookUpObjectMember(evaluator, subtype, memberName);
         } else if (isInstantiableClass(subtype)) {
-            memberInfo = lookUpClassMember(subtype, memberName);
+            memberInfo = lookUpClassMember(evaluator, subtype, memberName);
         }
 
         if (memberInfo && memberInfo.isTypeDeclared) {

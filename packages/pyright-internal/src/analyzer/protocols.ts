@@ -200,7 +200,7 @@ export function isProtocolUnsafeOverlap(evaluator: TypeEvaluator, protocol: Clas
             }
 
             // Does the classType have a member with the same name?
-            const srcMemberInfo = lookUpClassMember(classType, name);
+            const srcMemberInfo = lookUpClassMember(evaluator, classType, name);
             if (!srcMemberInfo) {
                 isUnsafeOverlap = false;
             }
@@ -392,14 +392,14 @@ function assignToProtocolInternal(
                     srcType.shared.effectiveMetaclass &&
                     isInstantiableClass(srcType.shared.effectiveMetaclass)
                 ) {
-                    srcMemberInfo = lookUpClassMember(srcType.shared.effectiveMetaclass, name);
+                    srcMemberInfo = lookUpClassMember(evaluator, srcType.shared.effectiveMetaclass, name);
                     if (srcMemberInfo) {
                         isMemberFromMetaclass = true;
                     }
                 }
 
                 if (!srcMemberInfo) {
-                    srcMemberInfo = lookUpClassMember(srcType, name);
+                    srcMemberInfo = lookUpClassMember(evaluator, srcType, name);
                 }
 
                 if (!srcMemberInfo) {
@@ -415,6 +415,7 @@ function assignToProtocolInternal(
                 // specialized.
                 if (!ClassType.isSameGenericClass(mroClass, destType)) {
                     destMemberType = partiallySpecializeType(
+                        evaluator,
                         destMemberType,
                         mroClass,
                         evaluator.getTypeClassType(),
@@ -431,6 +432,7 @@ function assignToProtocolInternal(
                     }
 
                     srcMemberType = partiallySpecializeType(
+                        evaluator,
                         symbolType,
                         srcMemberInfo.classType,
                         evaluator.getTypeClassType(),
@@ -588,7 +590,12 @@ function assignToProtocolInternal(
                     let getterType = evaluator.getGetterTypeFromProperty(destMemberType, /* inferTypeIfNeeded */ true);
 
                     if (getterType) {
-                        getterType = partiallySpecializeType(getterType, mroClass, evaluator.getTypeClassType());
+                        getterType = partiallySpecializeType(
+                            evaluator,
+                            getterType,
+                            mroClass,
+                            evaluator.getTypeClassType()
+                        );
                     }
 
                     if (
@@ -609,8 +616,18 @@ function assignToProtocolInternal(
                     }
 
                     if (
-                        !lookUpClassMember(destMemberType, '__set__', MemberAccessFlags.SkipInstanceMembers) &&
-                        !lookUpClassMember(destMemberType, '__delete__', MemberAccessFlags.SkipInstanceMembers)
+                        !lookUpClassMember(
+                            evaluator,
+                            destMemberType,
+                            '__set__',
+                            MemberAccessFlags.SkipInstanceMembers
+                        ) &&
+                        !lookUpClassMember(
+                            evaluator,
+                            destMemberType,
+                            '__delete__',
+                            MemberAccessFlags.SkipInstanceMembers
+                        )
                     ) {
                         isDestReadOnly = true;
                     }

@@ -352,8 +352,8 @@ export function getTypeOfBinaryOperation(
     // interpreted as a union operator?
     if (
         node.d.operator === OperatorType.BitwiseOr &&
-        !customMetaclassSupportsMethod(leftType, '__or__') &&
-        !customMetaclassSupportsMethod(rightType, '__ror__')
+        !customMetaclassSupportsMethod(evaluator, leftType, '__or__') &&
+        !customMetaclassSupportsMethod(evaluator, rightType, '__ror__')
     ) {
         let adjustedRightType = rightType;
         let adjustedLeftType = leftType;
@@ -648,7 +648,9 @@ export function getTypeOfUnaryOperation(
     }
 
     const exprTypeResult = evaluator.getTypeOfExpression(node.d.expr);
-    let exprType = evaluator.makeTopLevelTypeVarsConcrete(transformPossibleRecursiveTypeAlias(exprTypeResult.type));
+    let exprType = evaluator.makeTopLevelTypeVarsConcrete(
+        transformPossibleRecursiveTypeAlias(evaluator, exprTypeResult.type)
+    );
 
     const isIncomplete = exprTypeResult.isIncomplete;
 
@@ -1076,7 +1078,7 @@ function calcLiteralForBinaryOp(operator: OperatorType, leftType: Type, rightTyp
     return undefined;
 }
 
-function customMetaclassSupportsMethod(type: Type, methodName: string): boolean {
+function customMetaclassSupportsMethod(evaluator: TypeEvaluator, type: Type, methodName: string): boolean {
     if (!isInstantiableClass(type)) {
         return false;
     }
@@ -1090,7 +1092,7 @@ function customMetaclassSupportsMethod(type: Type, methodName: string): boolean 
         return false;
     }
 
-    const memberInfo = lookUpClassMember(metaclass, methodName);
+    const memberInfo = lookUpClassMember(evaluator, metaclass, methodName);
     if (!memberInfo) {
         return false;
     }

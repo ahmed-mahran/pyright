@@ -71,6 +71,7 @@ function isInheritedFromBuiltin(type: FunctionType | OverloadedType, classType?:
 }
 
 export function getFunctionDocStringInherited(
+    evaluator: TypeEvaluator,
     type: FunctionType,
     resolvedDecl: Declaration | undefined,
     sourceMapper: SourceMapper,
@@ -88,7 +89,12 @@ export function getFunctionDocStringInherited(
     // Search mro
     if (!docString && classType) {
         const funcName = type.shared.name;
-        const memberIterator = getClassMemberIterator(classType, funcName, DefaultClassIteratorFlagsForFunctions);
+        const memberIterator = getClassMemberIterator(
+            evaluator,
+            classType,
+            funcName,
+            DefaultClassIteratorFlagsForFunctions
+        );
 
         for (const classMember of memberIterator) {
             const decls = classMember.symbol.getDeclarations();
@@ -132,7 +138,12 @@ export function getOverloadedDocStringsInherited(
     const overloads = OverloadedType.getOverloads(type);
     if (classType && overloads.length > 0) {
         const funcName = overloads[0].shared.name;
-        const memberIterator = getClassMemberIterator(classType, funcName, DefaultClassIteratorFlagsForFunctions);
+        const memberIterator = getClassMemberIterator(
+            evaluator,
+            classType,
+            funcName,
+            DefaultClassIteratorFlagsForFunctions
+        );
 
         for (const classMember of memberIterator) {
             const inheritedDecl = classMember.symbol.getDeclarations().slice(-1)[0];
@@ -341,7 +352,7 @@ function _getPropertyDocStringInherited(
         return;
     }
 
-    const classItr = getClassIterator(classType, ClassIteratorFlags.Default);
+    const classItr = getClassIterator(evaluator, classType, ClassIteratorFlags.Default);
     // Walk the inheritance list starting with the current class searching for docStrings
     for (const [mroClass] of classItr) {
         if (!isInstantiableClass(mroClass)) {
