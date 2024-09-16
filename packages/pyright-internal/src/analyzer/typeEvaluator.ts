@@ -24876,13 +24876,16 @@ export function createTypeEvaluator(
         }
 
         let isIncompatible = false;
+        const unionConstraints: ConstraintTracker[] = [];
 
         sortedSrcTypes.forEach((subtype) => {
             if (isIncompatible) {
                 return;
             }
 
-            if (!assignType(destType, subtype, /* diag */ undefined, constraints, flags, recursionCount)) {
+            const subtypeConstraints = constraints ? constraints.clone() : undefined;
+
+            if (!assignType(destType, subtype, /* diag */ undefined, subtypeConstraints, flags, recursionCount)) {
                 // Determine if the current subtype is subsumed by another subtype
                 // in the same union. If so, we can ignore this.
                 const isSubtypeSubsumed = isTypeSubsumedByOtherType(
@@ -24895,14 +24898,21 @@ export function createTypeEvaluator(
                 // Try again with a concrete version of the subtype.
                 if (
                     !isSubtypeSubsumed &&
-                    !assignType(destType, subtype, diag?.createAddendum(), constraints, flags, recursionCount)
+                    !assignType(destType, subtype, diag?.createAddendum(), subtypeConstraints, flags, recursionCount)
                 ) {
                     isIncompatible = true;
                 }
             } else {
                 matchedSomeSubtypes = true;
             }
+            if (subtypeConstraints) {
+                unionConstraints.push(subtypeConstraints);
+            }
         }, /* sortSubtypes */ true);
+
+        if (constraints && !constraints.isLocked()) {
+            constraints.addCombinedConstraints(unionConstraints);
+        }
 
         if (isIncompatible) {
             // If we're looking for type overlaps and at least one type was matched,

@@ -11,7 +11,7 @@
 
 import { assert } from '../common/debug';
 import { getComplexityScoreForType } from './typeComplexity';
-import { Type, TypeVarScopeId, TypeVarType, isTypeSame } from './types';
+import { Type, TypeVarScopeId, TypeVarType, combineTypes, isTypeSame } from './types';
 
 // The maximum number of constraint sets that can be associated
 // with a constraint tracker. This equates to the number of overloads
@@ -180,6 +180,53 @@ export class ConstraintSet {
 
         return false;
     }
+
+    static combine(allSets: ConstraintSet[]): ConstraintSet | undefined {
+        if (allSets.length > 1) {
+            const result = new ConstraintSet();
+            const allKeys: Set<string> = new Set();
+            allSets.forEach((set) => {
+                for (const key of set._typeVarMap.keys()) {
+                    allKeys.add(key);
+                }
+                set._scopeIds?.forEach(result.addScopeId);
+            });
+            for (const key of allKeys) {
+                let typeVar: TypeVarType | undefined = undefined;
+                const lowerBounds: Type[] = [];
+                const upperBounds: Type[] = [];
+                let retainLiterals: boolean | undefined = undefined;
+                allSets.forEach((set) => {
+                    const typeVarConstraint = set._typeVarMap.get(key);
+                    if (typeVarConstraint) {
+                        typeVar = typeVarConstraint.typeVar;
+                        if (typeVarConstraint.lowerBound) {
+                            lowerBounds.push(typeVarConstraint.lowerBound);
+                        }
+                        if (typeVarConstraint.upperBound) {
+                            upperBounds.push(typeVarConstraint.upperBound);
+                        }
+                        if (typeVarConstraint.retainLiterals !== undefined) {
+                            retainLiterals ||= typeVarConstraint.retainLiterals;
+                        }
+                    }
+                });
+                if (typeVar) {
+                    result.setBounds(
+                        typeVar,
+                        lowerBounds.length > 0 ? combineTypes(lowerBounds) : undefined,
+                        upperBounds.length > 0 ? combineTypes(upperBounds) : undefined,
+                        retainLiterals
+                    );
+                }
+            }
+            return result;
+        } else if (allSets.length === 1) {
+            return allSets[0];
+        } else {
+            return undefined;
+        }
+    }
 }
 
 export class ConstraintTracker {
@@ -310,5 +357,35 @@ export class ConstraintTracker {
     getConstraintSet(index: number) {
         assert(index >= 0 && index < this._constraintSets.length);
         return this._constraintSets[index];
+    }
+
+    addCombinedConstraints(allConstraints: ConstraintTracker[]) {
+        const combinedConstraints = ConstraintTracker.combine(allConstraints);
+        this.addConstraintSets(combinedConstraints?._constraintSets ?? []);
+    }
+
+    static combine(allConstraints: ConstraintTracker[]): ConstraintTracker | undefined {
+        if (allConstraints.length > 1) {
+            const firstConstraints = allConstraints[0]._constraintSets;
+            assert(
+                allConstraints.every((constraints) => constraints._constraintSets.length === firstConstraints.length),
+                'All constraints must have the same number of sets'
+            );
+            const result = new ConstraintTracker();
+            for (let i = 0; i < firstConstraints.length; i++) {
+                const combinedSet = ConstraintSet.combine(
+                    allConstraints.map((constraints) => constraints._constraintSets[i])
+                );
+                if (combinedSet) {
+                    result._constraintSets.push(combinedSet);
+                }
+            }
+            result._isLocked = allConstraints.some((constraints) => constraints._isLocked);
+            return result;
+        } else if (allConstraints.length === 1) {
+            return allConstraints[0];
+        } else {
+            return undefined;
+        }
     }
 }
