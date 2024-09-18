@@ -1062,9 +1062,6 @@ export function createTypeEvaluator(
                     }`
                 );
             }
-            if (`${ParseTreeUtils.printExpression(node)} (${getLineNum(node)})` === 'subscriptable (28)') {
-                console.log('');
-            }
             return cacheEntry.typeResult;
         } else {
             // Is it cached in the speculative type cache?
@@ -23892,12 +23889,6 @@ export function createTypeEvaluator(
                 destType
             )} =? ${printType(curSrcType)} < ${printType(srcType)}`;
             console.log(msg);
-            if (
-                msg ===
-                '[assignClassWithTypeArgs] type[tuple[TypeVar | ParamSpec | TypeVarTuple, ...]] =? type[tuple[TypeVarTuple]] < type[tuple[TypeVarTuple]]'
-            ) {
-                console.log('');
-            }
             const res = assignTupleTypeArgs(
                 evaluatorInterface,
                 destType,
@@ -25239,13 +25230,16 @@ export function createTypeEvaluator(
         }
 
         let isIncompatible = false;
+        const unionConstraints: ConstraintTracker[] = [];
 
         sortedSrcTypes.forEach((subtype) => {
             if (isIncompatible) {
                 return;
             }
 
-            if (!assignType(destType, subtype, /* diag */ undefined, constraints, flags, recursionCount)) {
+            const subtypeConstraints = constraints ? constraints.clone() : undefined;
+
+            if (!assignType(destType, subtype, /* diag */ undefined, subtypeConstraints, flags, recursionCount)) {
                 // Determine if the current subtype is subsumed by another subtype
                 // in the same union. If so, we can ignore this.
                 const isSubtypeSubsumed = isTypeSubsumedByOtherType(
@@ -25258,14 +25252,21 @@ export function createTypeEvaluator(
                 // Try again with a concrete version of the subtype.
                 if (
                     !isSubtypeSubsumed &&
-                    !assignType(destType, subtype, diag?.createAddendum(), constraints, flags, recursionCount)
+                    !assignType(destType, subtype, diag?.createAddendum(), subtypeConstraints, flags, recursionCount)
                 ) {
                     isIncompatible = true;
                 }
             } else {
                 matchedSomeSubtypes = true;
             }
+            if (subtypeConstraints) {
+                unionConstraints.push(subtypeConstraints);
+            }
         }, /* sortSubtypes */ true);
+
+        if (constraints && !constraints.isLocked()) {
+            constraints.addCombinedConstraints(unionConstraints);
+        }
 
         if (isIncompatible) {
             // If we're looking for type overlaps and at least one type was matched,
