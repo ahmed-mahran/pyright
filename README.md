@@ -312,6 +312,7 @@ Similar PEP drafts:
 **TL;DR** VSCode marketplace has removed the extension and locked my account without notice.
 
 - [2024-08-22] Published first version on VSCode.
+
 - [2024-09-11] Last successfully published version. I've received a confirmation email
 
   > Extension validation is complete for your extension MyPyright (mashin.mypyright). No issues were observed and the version 1.3.0 is available for use in Visual Studio Marketplace.
@@ -319,6 +320,8 @@ Similar PEP drafts:
 - [2024-09-16] I opened an issue on original repo [microsoft#9010](https://github.com/microsoft/pyright/issues/9010) with suggested approach [PR#1](https://github.com/ahmed-mahran/mypyright/pull/1).
 
 - [2024-09-18] I found by chance that `MyPyright` extension is no longer available on VSCode marketplace and my account has got rate-limited and I no longer can open the marketplace using my account.
+
+- [2024-09-19] I've renamed the repo from `pyright` to `mypyright` and changed all artwork just in case if it was a branding issue. Initially, I kept original branding to honor `pyright` stakeholders and maintainers.
 
 - [2024-09-19] After emailing the support team, I received this response:
 
