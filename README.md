@@ -1,4 +1,4 @@
-![Pyright](https://github.com/microsoft/pyright/blob/main/docs/img/PyrightLarge.png)
+![MyPyright](https://github.com/ahmed-mahran/mypyright/blob/main/docs/img/MyPyrightLarge.png)
 
 [![Visual Studio Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/mashin.mypyright?logo=visual%20studio%20code)
 ](https://marketplace.visualstudio.com/items?itemName=mashin.mypyright)
