@@ -39,6 +39,7 @@ import { isPrivateName } from './symbolNameUtils';
 import { Arg, EvalFlags, TypeEvaluator, TypeResult } from './typeEvaluatorTypes';
 import {
     AnyType,
+    CallableType,
     ClassType,
     ClassTypeFlags,
     combineTypes,
@@ -1248,9 +1249,9 @@ export function validateDataClassTransformDecorator(
 }
 
 export function getDataclassDecoratorBehaviors(type: Type): DataClassBehaviors | undefined {
-    let functionType: FunctionType | undefined;
+    let callableType: CallableType | undefined;
     if (isFunction(type)) {
-        functionType = type;
+        callableType = type;
     } else if (isOverloaded(type)) {
         // Find the first overload or implementation that contains a
         // dataclass_transform decorator. If more than one have such a decorator,
@@ -1258,27 +1259,40 @@ export function getDataclassDecoratorBehaviors(type: Type): DataClassBehaviors |
         const overloads = OverloadedType.getOverloads(type);
         const impl = OverloadedType.getImplementation(type);
 
-        functionType = overloads.find((overload) => !!overload.shared.decoratorDataClassBehaviors);
+        callableType = overloads.find(
+            (overload) =>
+                (isFunction(overload) && !!overload.shared.decoratorDataClassBehaviors) ||
+                (isClass(overload) && !!overload.shared.classDataClassTransform)
+        );
 
-        if (!functionType && impl && isFunction(impl) && impl.shared.decoratorDataClassBehaviors) {
-            functionType = impl;
+        if (
+            !callableType &&
+            impl &&
+            ((isFunction(impl) && impl.shared.decoratorDataClassBehaviors) ||
+                (isClass(impl) && impl.shared.classDataClassTransform))
+        ) {
+            callableType = impl;
         }
 
-        if (!functionType && overloads.length > 0) {
-            functionType = overloads[0];
+        if (!callableType && overloads.length > 0) {
+            callableType = overloads[0];
         }
     }
 
-    if (!functionType) {
+    if (!callableType) {
         return undefined;
     }
 
-    if (functionType.shared.decoratorDataClassBehaviors) {
-        return functionType.shared.decoratorDataClassBehaviors;
+    if (isFunction(callableType) && callableType.shared.decoratorDataClassBehaviors) {
+        return callableType.shared.decoratorDataClassBehaviors;
+    }
+
+    if (isClass(callableType) && callableType.shared.classDataClassTransform) {
+        return callableType.shared.classDataClassTransform;
     }
 
     // Is this the built-in dataclass? If so, return the default behaviors.
-    if (functionType.shared.fullName === 'dataclasses.dataclass') {
+    if (callableType.shared.fullName === 'dataclasses.dataclass') {
         return {
             fieldDescriptorNames: ['dataclasses.field', 'dataclasses.Field'],
         };

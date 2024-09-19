@@ -150,19 +150,22 @@ function applyPartialTransform(
         // Apply the partial transform to each of the functions in the overload.
         overloads.forEach((overload) => {
             // Apply the transform to this overload, but don't report errors.
-            const transformResult = applyPartialTransformToFunction(
-                evaluator,
-                /* errorNode */ undefined,
-                argList,
-                callMemberType,
-                overload
-            );
+            const func = evaluator.getFunctionTypeOfCallable(overload);
+            if (func) {
+                const transformResult = applyPartialTransformToFunction(
+                    evaluator,
+                    /* errorNode */ undefined,
+                    argList,
+                    callMemberType,
+                    func
+                );
 
-            if (transformResult) {
-                if (transformResult.argumentErrors) {
-                    sawArgErrors = true;
-                } else if (isFunction(transformResult.returnType)) {
-                    applicableOverloads.push(transformResult.returnType);
+                if (transformResult) {
+                    if (transformResult.argumentErrors) {
+                        sawArgErrors = true;
+                    } else if (isFunction(transformResult.returnType)) {
+                        applicableOverloads.push(transformResult.returnType);
+                    }
                 }
             }
         });

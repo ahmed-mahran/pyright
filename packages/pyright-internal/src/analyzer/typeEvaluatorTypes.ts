@@ -39,6 +39,7 @@ import { Symbol } from './symbol';
 import { PrintTypeFlags } from './typePrinter';
 import {
     AnyType,
+    CallableType,
     ClassType,
     FunctionParam,
     FunctionType,
@@ -831,4 +832,7 @@ export interface TypeEvaluator {
         callName: string,
         logger: ConsoleInterface
     ) => void;
+
+    getOverloads: (type: OverloadedType) => FunctionType[];
+    getFunctionTypeOfCallable: (callableType: CallableType) => FunctionType | undefined;
 }

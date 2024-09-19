@@ -867,9 +867,12 @@ function createFunctionFromNewMethod(
 
     const newOverloads: FunctionType[] = [];
     OverloadedType.getOverloads(newType).forEach((overload) => {
-        const converted = convertNewToConstructor(overload);
-        if (converted) {
-            newOverloads.push(converted);
+        const func = evaluator.getFunctionTypeOfCallable(overload);
+        if (func) {
+            const converted = convertNewToConstructor(func);
+            if (converted) {
+                newOverloads.push(converted);
+            }
         }
     });
 
@@ -998,9 +1001,12 @@ function createFunctionFromInitMethod(
 
     const initOverloads: FunctionType[] = [];
     OverloadedType.getOverloads(initType).forEach((overload) => {
-        const converted = convertInitToConstructor(overload);
-        if (converted) {
-            initOverloads.push(converted);
+        const func = evaluator.getFunctionTypeOfCallable(overload);
+        if (func) {
+            const converted = convertInitToConstructor(func);
+            if (converted) {
+                initOverloads.push(converted);
+            }
         }
     });
 

@@ -18,6 +18,7 @@ import { isEffectivelyClassVar, isTypedDictMemberAccessedThroughIndex } from './
 import { ApplyTypeVarOptions, ArgWithExpression, TypeEvaluator } from './typeEvaluatorTypes';
 import {
     AnyType,
+    CallableType,
     ClassType,
     ClassTypeFlags,
     combineTypes,
@@ -28,6 +29,7 @@ import {
     FunctionTypeFlags,
     isAny,
     isAnyOrUnknown,
+    isCallable,
     isClass,
     isClassInstance,
     isFunction,
@@ -431,9 +433,13 @@ export function mapSubtypes(
 // Iterates over each signature in a function or overload, allowing the
 // caller to replace one or more signatures with new ones.
 export function mapSignatures(
-    type: FunctionType | OverloadedType,
+    type: CallableType | OverloadedType,
     callback: (type: FunctionType) => FunctionType | undefined
 ): OverloadedType | FunctionType | undefined {
+    if (isClass(type)) {
+        return undefined;
+    }
+
     if (isFunction(type)) {
         return callback(type);
     }
@@ -442,6 +448,9 @@ export function mapSignatures(
     let changeMade = false;
 
     OverloadedType.getOverloads(type).forEach((overload, index) => {
+        if (!isFunction(overload)) {
+            return;
+        }
         const newOverload = callback(overload);
         if (newOverload !== overload) {
             changeMade = true;
@@ -764,7 +773,9 @@ export function doForEachSignature(
         callback(type, 0);
     } else {
         OverloadedType.getOverloads(type).forEach((overload, index) => {
-            callback(overload, index);
+            if (isFunction(overload)) {
+                callback(overload, index);
+            }
         });
     }
 }
@@ -1304,7 +1315,7 @@ export function isProperty(type: Type) {
     return isClassInstance(type) && ClassType.isPropertyClass(type);
 }
 
-export function isCallableType(evaluator: TypeEvaluator, type: Type): boolean {
+export function isEffectivelyCallable(evaluator: TypeEvaluator, type: Type): boolean {
     if (isFunction(type) || isOverloaded(type) || isAnyOrUnknown(type)) {
         return true;
     }
@@ -1323,7 +1334,7 @@ export function isCallableType(evaluator: TypeEvaluator, type: Type): boolean {
     }
 
     if (isUnion(type)) {
-        return type.priv.subtypes.every((subtype) => isCallableType(evaluator, subtype));
+        return type.priv.subtypes.every((subtype) => isEffectivelyCallable(evaluator, subtype));
     }
 
     return false;
@@ -3489,12 +3500,14 @@ export class TypeVarTransformer {
 
             // Specialize each of the functions in the overload.
             const overloads = OverloadedType.getOverloads(type);
-            const newOverloads: FunctionType[] = [];
+            const newOverloads: CallableType[] = [];
 
             overloads.forEach((entry) => {
-                const replacementType = this.transformTypeVarsInFunctionType(entry, recursionCount);
+                const replacementType = isFunction(entry)
+                    ? this.transformTypeVarsInFunctionType(entry, recursionCount)
+                    : this.transformTypeVarsInClassType(entry, recursionCount);
 
-                if (isFunction(replacementType)) {
+                if (isCallable(replacementType)) {
                     newOverloads.push(replacementType);
                 } else {
                     appendArray(newOverloads, OverloadedType.getOverloads(replacementType));

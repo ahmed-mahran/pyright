@@ -663,6 +663,9 @@ export const enum ClassTypeFlags {
     // This class is rejected when used as the second argument to
     // an isinstance or issubclass call.
     IllegalIsinstanceClass = 1 << 24,
+
+    // This class implements __call__ magic.
+    Callable = 1 << 25,
 }
 
 export interface DataClassBehaviors {
@@ -833,6 +836,12 @@ export interface ClassDetailsPriv {
     // the "deprecated" class. This allows these instances to be used
     // as decorators for other classes or functions.
     deprecatedInstanceMessage?: string | undefined;
+
+    // If this class is part of an overloaded function, this
+    // refers back to the overloaded function type.
+    overloaded?: OverloadedType;
+    // Class is decorated with @overload
+    isOverloaded?: boolean;
 }
 
 export interface ClassType extends TypeBase<TypeCategory.Class> {
@@ -910,6 +919,28 @@ export namespace ClassType {
         }
 
         return newInstance;
+    }
+
+    export function cloneWithDocString(type: ClassType, docString?: string): ClassType {
+        const newClass = TypeBase.cloneType(type);
+
+        // Make a shallow clone of the details.
+        newClass.shared = { ...type.shared };
+
+        newClass.shared.docString = docString;
+
+        return newClass;
+    }
+
+    export function cloneWithDeprecatedMessage(type: ClassType, deprecatedMessage?: string): ClassType {
+        const newClass = TypeBase.cloneType(type);
+
+        // Make a shallow clone of the details.
+        newClass.shared = { ...type.shared };
+
+        newClass.shared.deprecatedMessage = deprecatedMessage;
+
+        return newClass;
     }
 
     export function specialize(
@@ -1264,6 +1295,21 @@ export namespace ClassType {
 
     export function isTupleClass(classType: ClassType) {
         return !!(classType.shared.flags & ClassTypeFlags.TupleClass);
+    }
+
+    export function isOverloaded(type: ClassType): boolean {
+        return type.priv.isOverloaded === true;
+    }
+
+    export function isCallable(type: ClassType): boolean {
+        return (type.shared.flags & ClassTypeFlags.Callable) !== 0;
+    }
+
+    export function hasField(type: ClassType, field: string): boolean {
+        return (
+            type.shared.fields.has(field) ||
+            type.shared.baseClasses.some((baseClass) => isClass(baseClass) && hasField(baseClass, field))
+        );
     }
 
     export function getTypeParams(classType: ClassType) {
@@ -2309,9 +2355,11 @@ export namespace FunctionType {
     }
 }
 
+export type CallableType = FunctionType | ClassType;
+
 export interface OverloadedDetailsPriv {
     // eslint-disable-next-line @typescript-eslint/naming-convention
-    _overloads: FunctionType[];
+    _overloads: CallableType[];
 
     // eslint-disable-next-line @typescript-eslint/naming-convention
     _implementation: Type | undefined;
@@ -2322,7 +2370,7 @@ export interface OverloadedType extends TypeBase<TypeCategory.Overloaded> {
 }
 
 export namespace OverloadedType {
-    export function create(overloads: FunctionType[], implementation?: Type): OverloadedType {
+    export function create(overloads: CallableType[], implementation?: Type): OverloadedType {
         const newType: OverloadedType = {
             category: TypeCategory.Overloaded,
             flags: TypeFlags.Instance,
@@ -2347,12 +2395,12 @@ export namespace OverloadedType {
     }
 
     // Adds a new overload or an implementation.
-    export function addOverload(type: OverloadedType, functionType: FunctionType) {
+    export function addOverload(type: OverloadedType, functionType: CallableType) {
         functionType.priv.overloaded = type;
         type.priv._overloads.push(functionType);
     }
 
-    export function getOverloads(type: OverloadedType): FunctionType[] {
+    export function getOverloads(type: OverloadedType): CallableType[] {
         return type.priv._overloads;
     }
 
@@ -3277,6 +3325,10 @@ export function isUnpacked(type: Type): boolean {
 
 export function isFunction(type: Type): type is FunctionType {
     return type.category === TypeCategory.Function;
+}
+
+export function isCallable(type: Type): type is CallableType {
+    return isFunction(type) || (isClass(type) && ClassType.isCallable(type));
 }
 
 export function isOverloaded(type: Type): type is OverloadedType {

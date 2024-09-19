@@ -1772,10 +1772,13 @@ export function getCodeFlowEngine(
                     let noReturnOverloadCount = 0;
 
                     OverloadedType.getOverloads(callSubtype).forEach((overload) => {
-                        overloadCount++;
+                        const func = evaluator.getFunctionTypeOfCallable(overload);
+                        if (func) {
+                            overloadCount++;
 
-                        if (isFunctionNoReturn(overload, isCallAwaited)) {
-                            noReturnOverloadCount++;
+                            if (isFunctionNoReturn(func, isCallAwaited)) {
+                                noReturnOverloadCount++;
+                            }
                         }
                     });
 

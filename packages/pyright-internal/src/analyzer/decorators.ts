@@ -27,6 +27,7 @@ import {
 import { Arg, EvalFlags, TypeEvaluator } from './typeEvaluatorTypes';
 import { isPartlyUnknown, isProperty } from './typeUtils';
 import {
+    CallableType,
     ClassType,
     ClassTypeFlags,
     DataClassBehaviors,
@@ -151,9 +152,11 @@ export function applyFunctionDecorator(
     ) {
         if (isFunction(inputFunctionType)) {
             inputFunctionType.shared.flags |= FunctionTypeFlags.Overloaded;
-            undecoratedType.shared.flags |= FunctionTypeFlags.Overloaded;
-            return inputFunctionType;
+        } else if (isClass(inputFunctionType)) {
+            inputFunctionType.priv.isOverloaded = true;
         }
+        undecoratedType.shared.flags |= FunctionTypeFlags.Overloaded;
+        return inputFunctionType;
     }
 
     if (decoratorNode.d.expr.nodeType === ParseNodeType.Call) {
@@ -495,7 +498,7 @@ export function addOverloadsToFunctionType(evaluator: TypeEvaluator, node: Funct
                 }
             }
 
-            let overloadedTypes: FunctionType[] = [];
+            let overloadedTypes: CallableType[] = [];
 
             // Look at the previous declaration's type.
             const prevDecl = decls[declIndex - 1];
@@ -504,6 +507,10 @@ export function addOverloadsToFunctionType(evaluator: TypeEvaluator, node: Funct
                 if (prevDeclDeclTypeInfo) {
                     if (isFunction(prevDeclDeclTypeInfo.decoratedType)) {
                         if (FunctionType.isOverloaded(prevDeclDeclTypeInfo.decoratedType)) {
+                            overloadedTypes.push(prevDeclDeclTypeInfo.decoratedType);
+                        }
+                    } else if (isClass(prevDeclDeclTypeInfo.decoratedType)) {
+                        if (ClassType.isOverloaded(prevDeclDeclTypeInfo.decoratedType)) {
                             overloadedTypes.push(prevDeclDeclTypeInfo.decoratedType);
                         }
                     } else if (isOverloaded(prevDeclDeclTypeInfo.decoratedType)) {
@@ -521,7 +528,10 @@ export function addOverloadsToFunctionType(evaluator: TypeEvaluator, node: Funct
                 }
             }
 
-            if (isFunction(type) && FunctionType.isOverloaded(type)) {
+            if (
+                (isFunction(type) && FunctionType.isOverloaded(type)) ||
+                (isClass(type) && ClassType.isOverloaded(type))
+            ) {
                 overloadedTypes.push(type);
             } else {
                 implementation = type;
@@ -540,8 +550,11 @@ export function addOverloadsToFunctionType(evaluator: TypeEvaluator, node: Funct
             if (implementation && isFunction(implementation) && implementation.shared.docString) {
                 const docString = implementation.shared.docString;
                 overloadedTypes = overloadedTypes.map((overload) => {
-                    if (FunctionType.isOverloaded(overload) && !overload.shared.docString) {
+                    if (isFunction(overload) && FunctionType.isOverloaded(overload) && !overload.shared.docString) {
                         return FunctionType.cloneWithDocString(overload, docString);
+                    }
+                    if (isClass(overload) && ClassType.isOverloaded(overload) && !overload.shared.docString) {
+                        return ClassType.cloneWithDocString(overload, docString);
                     }
                     return overload;
                 });
@@ -553,8 +566,19 @@ export function addOverloadsToFunctionType(evaluator: TypeEvaluator, node: Funct
             if (implementation && isFunction(implementation) && implementation.shared.deprecatedMessage !== undefined) {
                 const deprecationMessage = implementation.shared.deprecatedMessage;
                 overloadedTypes = overloadedTypes.map((overload) => {
-                    if (FunctionType.isOverloaded(overload) && overload.shared.deprecatedMessage === undefined) {
+                    if (
+                        isFunction(overload) &&
+                        FunctionType.isOverloaded(overload) &&
+                        overload.shared.deprecatedMessage === undefined
+                    ) {
                         return FunctionType.cloneWithDeprecatedMessage(overload, deprecationMessage);
+                    }
+                    if (
+                        isClass(overload) &&
+                        ClassType.isOverloaded(overload) &&
+                        overload.shared.deprecatedMessage === undefined
+                    ) {
+                        return ClassType.cloneWithDocString(overload, deprecationMessage);
                     }
                     return overload;
                 });

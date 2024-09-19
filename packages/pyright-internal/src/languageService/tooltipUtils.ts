@@ -22,7 +22,7 @@ import {
     getVariableDocString,
 } from '../analyzer/typeDocStringUtils';
 import { TypeEvaluator } from '../analyzer/typeEvaluatorTypes';
-import { MemberAccessFlags, lookUpClassMember } from '../analyzer/typeUtils';
+import { MemberAccessFlags, getUnknownTypeForCallable, lookUpClassMember } from '../analyzer/typeUtils';
 import {
     ClassType,
     FunctionType,
@@ -79,7 +79,7 @@ export function getOverloadedTooltip(
         getFunctionTooltip(
             /* label */ '',
             o.shared.name,
-            o,
+            evaluator.getFunctionTypeOfCallable(o) ?? getUnknownTypeForCallable(),
             evaluator,
             /* isProperty */ false,
             functionSignatureDisplay

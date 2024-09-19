@@ -57,7 +57,11 @@ function isInheritedFromBuiltin(type: FunctionType | OverloadedType, classType?:
         if (overloads.length === 0) {
             return false;
         }
-        type = overloads[0];
+        const overload = overloads.find(isFunction);
+        if (!overload) {
+            return false;
+        }
+        type = overload;
     }
 
     // Functions that are bound to a different type than where they

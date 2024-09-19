@@ -218,6 +218,7 @@ import {
 import * as TypePrinter from './typePrinter';
 import {
     AnyType,
+    CallableType,
     ClassType,
     ClassTypeFlags,
     combineTypes,
@@ -2471,6 +2472,94 @@ export function createTypeEvaluator(
         return undefined;
     }
 
+    function getFunctionTypeOfCallable(callableType: CallableType): FunctionType | undefined {
+        function getFunctionType(type: Type): FunctionType | undefined {
+            if (isFunction(type)) {
+                return type;
+            } else if (isOverloaded(type)) {
+                const impl = OverloadedType.getImplementation(type);
+                if (impl) {
+                    return getFunctionType(impl);
+                }
+                const overloads = OverloadedType.getOverloads(type);
+                if (overloads.length > 0) {
+                    return getFunctionType(overloads[0]);
+                }
+            } else if (isClass(type)) {
+                if (TypeBase.isInstantiable(type)) {
+                    const constructorType = createFunctionFromConstructor(evaluatorInterface, type);
+
+                    if (constructorType) {
+                        return getFunctionType(constructorType);
+                    }
+                } else {
+                    const methodType = getBoundMagicMethod(type, '__call__');
+                    if (methodType) {
+                        return getFunctionType(methodType);
+                    }
+                }
+            }
+            return undefined;
+        }
+        return getFunctionType(callableType);
+    }
+
+    function getFunctionsOfCallable(callType: CallableType): FunctionType[] {
+        const functions: FunctionType[] = [];
+
+        function addCallable(type: CallableType) {
+            if (isFunction(type)) {
+                functions.push(expandTypedKwargs(type));
+            } else {
+                addSubtypeFunctions(type);
+            }
+        }
+
+        function addFunction(type: FunctionType | OverloadedType) {
+            if (isFunction(type)) {
+                addCallable(type);
+            } else {
+                OverloadedType.getOverloads(type).forEach(addCallable);
+            }
+        }
+
+        function addSubtypeFunctions(callType: CallableType) {
+            doForEachSubtype(callType, (subtype) => {
+                switch (subtype.category) {
+                    case TypeCategory.Function:
+                    case TypeCategory.Overloaded: {
+                        addFunction(subtype);
+                        break;
+                    }
+
+                    case TypeCategory.Class: {
+                        if (TypeBase.isInstantiable(subtype)) {
+                            const constructorType = createFunctionFromConstructor(evaluatorInterface, subtype);
+
+                            if (constructorType) {
+                                doForEachSubtype(constructorType, (subtype) => {
+                                    if (isFunction(subtype) || isOverloaded(subtype)) {
+                                        addFunction(subtype);
+                                    }
+                                });
+                            }
+                        } else {
+                            const methodType = getBoundMagicMethod(subtype, '__call__');
+                            if (methodType) {
+                                addFunction(methodType);
+                            }
+                        }
+                        break;
+                    }
+                }
+            });
+        }
+
+        addSubtypeFunctions(callType);
+
+        return functions;
+    }
+
     // Returns the signature(s) associated with a call node that contains
     // the specified node. It also returns the index of the argument
     // that contains the node.
@@ -2550,9 +2639,7 @@ export function createTypeEvaluator(
             if (isFunction(type)) {
                 addOneFunctionToSignature(type);
             } else {
-                OverloadedType.getOverloads(type).forEach((func) => {
-                    addOneFunctionToSignature(func);
-                });
+                getOverloads(type).forEach(addOneFunctionToSignature);
             }
         }
 
@@ -5876,23 +5963,31 @@ export function createTypeEvaluator(
                 if (memberName === '__self__') {
                     // The "__self__" member is not currently defined in the "function"
                     // class, so we'll special-case it here.
-                    let functionType: FunctionType | undefined;
+                    let callableType: CallableType | undefined;
 
                     if (isFunction(baseType)) {
-                        functionType = baseType;
+                        callableType = baseType;
                     } else {
                         const overloads = OverloadedType.getOverloads(baseType);
                         if (overloads.length > 0) {
-                            functionType = overloads[0];
+                            callableType = overloads[0];
                         }
                     }
 
                     if (
-                        functionType &&
-                        functionType.priv.preBoundFlags !== undefined &&
-                        (functionType.priv.preBoundFlags & FunctionTypeFlags.StaticMethod) === 0
+                        callableType &&
+                        isFunction(callableType) &&
+                        callableType.priv.preBoundFlags !== undefined &&
+                        (callableType.priv.preBoundFlags & FunctionTypeFlags.StaticMethod) === 0
                     ) {
-                        type = functionType.priv.boundToType;
+                        type = callableType.priv.boundToType;
+                    } else {
+                        type = getTypeOfMemberAccessWithBaseType(
+                            node,
+                            { type: callableType ?? UnknownType.create() },
+                            usage,
+                            flags
+                        ).type;
                     }
                 } else {
                     type = getTypeOfMemberAccessWithBaseType(
@@ -9486,7 +9581,7 @@ export function createTypeEvaluator(
 
         useSignatureTracker(errorNode, () => {
             // Create a list of potential overload matches based on arguments.
-            OverloadedType.getOverloads(typeResult.type).forEach((overload) => {
+            getOverloads(typeResult.type).forEach((overload) => {
                 useSpeculativeMode(speculativeNode, () => {
                     const matchResults = matchArgsToParams(
                         errorNode,
@@ -9560,7 +9655,7 @@ export function createTypeEvaluator(
         // cache or record any diagnostics at this stage.
         useSpeculativeMode(speculativeNode, () => {
             let overloadIndex = 0;
-            OverloadedType.getOverloads(type).forEach((overload) => {
+            getOverloads(type).forEach((overload) => {
                 // Consider only the functions that have the @overload decorator,
                 // not the final function that omits the overload. This is the
                 // intended behavior according to PEP 484.
@@ -10195,6 +10290,7 @@ export function createTypeEvaluator(
         // Handle the 'cast' call as a special case.
         if (
             overloads.length > 0 &&
+            isFunction(overloads[0]) &&
             FunctionType.isBuiltIn(overloads[0], ['typing.cast', 'typing_extensions.cast']) &&
             argList.length === 2
         ) {
@@ -17681,6 +17777,12 @@ export function createTypeEvaluator(
                 classType.shared.localSlotsNames = slotsNames;
             }
 
+            // Determine if the class or any of its parents has "__call__" method
+            // hence it should be flagged Callable
+            if (ClassType.hasField(classType, '__call__')) {
+                classType.shared.flags |= ClassTypeFlags.Callable;
+            }
+
             // Determine if the class should be a "pseudo-generic" class, characterized
             // by having an __init__ method with parameters that lack type annotations.
             // For such classes, we'll treat them as generic, with the type arguments provided
@@ -21892,7 +21994,7 @@ export function createTypeEvaluator(
                             declarations.push(paramDecl);
                         }
                     } else if (isOverloaded(baseType)) {
-                        OverloadedType.getOverloads(baseType).forEach((f) => {
+                        getOverloads(baseType).forEach((f) => {
                             const paramDecl = getDeclarationFromKeywordParam(f, paramName);
                             if (paramDecl) {
                                 declarations.push(paramDecl);
@@ -22998,7 +23100,7 @@ export function createTypeEvaluator(
         if (isFunction(type)) {
             getEffectiveReturnType(type);
         } else if (isOverloaded(type)) {
-            OverloadedType.getOverloads(type).forEach((overload) => {
+            getOverloads(type).forEach((overload) => {
                 getEffectiveReturnType(overload);
             });
 
@@ -24815,7 +24917,7 @@ export function createTypeEvaluator(
                 }
 
                 // Find all of the overloaded functions that match the parameters.
-                const overloads = OverloadedType.getOverloads(concreteSrcType);
+                const overloads = getOverloads(concreteSrcType);
                 const filteredOverloads: FunctionType[] = [];
                 const typeVarSignatures: ConstraintSet[] = [];
 
@@ -26841,7 +26943,7 @@ export function createTypeEvaluator(
                 return validateOverrideMethodInternal(baseMethod, overrideMethod, diag, enforceParamNames);
             }
 
-            const overloadsAndImpl = [...OverloadedType.getOverloads(overrideMethod)];
+            const overloadsAndImpl = [...getOverloads(overrideMethod)];
             const impl = OverloadedType.getImplementation(overrideMethod);
             if (impl && isFunction(impl)) {
                 overloadsAndImpl.push(impl);
@@ -26869,7 +26971,7 @@ export function createTypeEvaluator(
         // For a non-overloaded method overriding an overloaded method, the
         // override must match all of the overloads.
         if (isFunction(overrideMethod)) {
-            return OverloadedType.getOverloads(baseMethod).every((overload) => {
+            return getOverloads(baseMethod).every((overload) => {
                 // If the override isn't applicable for this base class, skip the check.
                 if (baseClass && !isOverrideMethodApplicable(overload, baseClass)) {
                     return true;
@@ -26889,9 +26991,9 @@ export function createTypeEvaluator(
         // has additional overloads that are not present in the override.
 
         let previousMatchIndex = -1;
-        const baseOverloads = OverloadedType.getOverloads(baseMethod);
+        const baseOverloads = getOverloads(baseMethod);
 
-        for (const overrideOverload of OverloadedType.getOverloads(overrideMethod)) {
+        for (const overrideOverload of getOverloads(overrideMethod)) {
             let possibleMatchIndex: number | undefined;
 
             let matchIndex = baseOverloads.findIndex((baseOverload, index) => {
@@ -27703,7 +27805,7 @@ export function createTypeEvaluator(
         if (isOverloaded(specializedFunction)) {
             // For overloaded functions, use the first overload. This isn't
             // strictly correct, but this is an extreme edge case.
-            return FunctionType.clone(OverloadedType.getOverloads(specializedFunction)[0], stripFirstParam, baseType);
+            return FunctionType.clone(getOverloads(specializedFunction)[0], stripFirstParam, baseType);
         }
 
         return undefined;
@@ -27861,6 +27963,10 @@ export function createTypeEvaluator(
         }
 
         return false;
+    }
+
+    function getOverloads(type: OverloadedType) {
+        return OverloadedType.getOverloads(type).flatMap(getFunctionsOfCallable);
     }
 
     function printObjectTypeForClass(type: ClassType): string {
@@ -28139,6 +28245,8 @@ export function createTypeEvaluator(
         setTypeResultForNode,
         checkForCancellation,
         printControlFlowGraph,
+        getOverloads,
+        getFunctionTypeOfCallable,
     };
 
     const codeFlowEngine = getCodeFlowEngine(evaluatorInterface, speculativeTypeTracker);

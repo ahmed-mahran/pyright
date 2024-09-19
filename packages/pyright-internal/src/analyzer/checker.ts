@@ -136,6 +136,7 @@ import {
 } from './typeGuards';
 import {
     AnyType,
+    CallableType,
     ClassType,
     ClassTypeFlags,
     DataClassEntry,
@@ -2591,12 +2592,14 @@ export class Checker extends ParseTreeWalker {
         let totalMethods = overloads.length;
 
         overloads.forEach((overload) => {
-            if (FunctionType.isStaticMethod(overload)) {
-                staticMethodCount++;
-            }
+            if (isFunction(overload)) {
+                if (FunctionType.isStaticMethod(overload)) {
+                    staticMethodCount++;
+                }
 
-            if (FunctionType.isClassMethod(overload)) {
-                classMethodCount++;
+                if (FunctionType.isClassMethod(overload)) {
+                    classMethodCount++;
+                }
             }
         });
 
@@ -2613,22 +2616,28 @@ export class Checker extends ParseTreeWalker {
         }
 
         if (staticMethodCount > 0 && staticMethodCount < totalMethods) {
+            const firstOverload = overloads[0];
             this._evaluator.addDiagnostic(
                 DiagnosticRule.reportInconsistentOverload,
                 LocMessage.overloadStaticMethodInconsistent().format({
                     name: node.d.name.d.value,
                 }),
-                overloads[0]?.shared.declaration?.node.d.name ?? node.d.name
+                (firstOverload && isFunction(firstOverload)
+                    ? firstOverload.shared.declaration?.node.d.name
+                    : undefined) ?? node.d.name
             );
         }
 
         if (classMethodCount > 0 && classMethodCount < totalMethods) {
+            const firstOverload = overloads[0];
             this._evaluator.addDiagnostic(
                 DiagnosticRule.reportInconsistentOverload,
                 LocMessage.overloadClassMethodInconsistent().format({
                     name: node.d.name.d.value,
                 }),
-                overloads[0]?.shared.declaration?.node.d.name ?? node.d.name
+                (firstOverload && isFunction(firstOverload)
+                    ? firstOverload.shared.declaration?.node.d.name
+                    : undefined) ?? node.d.name
             );
         }
     }
@@ -2636,8 +2645,8 @@ export class Checker extends ParseTreeWalker {
     // Validates that overloads do not overlap with inconsistent return results.
     private _validateOverloadConsistency(
         node: FunctionNode,
-        functionType: FunctionType,
-        prevOverloads: FunctionType[]
+        functionType: CallableType,
+        prevOverloads: CallableType[]
     ) {
         // Skip the check entirely if it's disabled.
         if (this._fileInfo.diagnosticRuleSet.reportOverlappingOverload === 'none') {
@@ -2663,8 +2672,14 @@ export class Checker extends ParseTreeWalker {
         for (let i = 0; i < prevOverloads.length; i++) {
             const prevOverload = prevOverloads[i];
             if (this._isOverlappingOverload(prevOverload, functionType, /* partialOverlap */ true)) {
-                const prevReturnType = FunctionType.getEffectiveReturnType(prevOverload);
-                const returnType = FunctionType.getEffectiveReturnType(functionType);
+                const prevOverloadFunctionType = this._evaluator.getFunctionTypeOfCallable(prevOverload);
+                const functionTypeFunctionType = this._evaluator.getFunctionTypeOfCallable(functionType);
+                const prevReturnType = prevOverloadFunctionType
+                    ? FunctionType.getEffectiveReturnType(prevOverloadFunctionType)
+                    : undefined;
+                const returnType = functionTypeFunctionType
+                    ? FunctionType.getEffectiveReturnType(functionTypeFunctionType)
+                    : undefined;
 
                 if (
                     prevReturnType &&
@@ -2696,16 +2711,24 @@ export class Checker extends ParseTreeWalker {
     // Mypy reports overlapping overload errors on the line that contains the
     // earlier overload. Typeshed stubs contain type: ignore comments on these
     // lines, so it is important for us to report them in the same manner.
-    private _findNodeForOverload(functionNode: FunctionNode, overloadType: FunctionType): FunctionNode | undefined {
+    private _findNodeForOverload(
+        functionNode: FunctionNode,
+        overloadType: CallableType
+    ): FunctionNode | ClassNode | undefined {
         const decls = this._evaluator.getDeclInfoForNameNode(functionNode.d.name)?.decls;
         if (!decls) {
             return undefined;
         }
 
         for (const decl of decls) {
-            if (decl.type === DeclarationType.Function) {
+            if (isFunction(overloadType) && decl.type === DeclarationType.Function) {
                 const functionType = this._evaluator.getTypeOfFunction(decl.node);
                 if (functionType?.functionType === overloadType) {
+                    return decl.node;
+                }
+            } else if (isClass(overloadType) && decl.type === DeclarationType.Class) {
+                const classType = this._evaluator.getTypeOfClass(decl.node);
+                if (classType?.classType === overloadType) {
                     return decl.node;
                 }
             }
@@ -2714,13 +2737,17 @@ export class Checker extends ParseTreeWalker {
         return undefined;
     }
 
-    private _isOverlappingOverload(functionType: FunctionType, prevOverload: FunctionType, partialOverlap: boolean) {
+    private _isOverlappingOverload(callableType: CallableType, prevOverload: CallableType, partialOverlap: boolean) {
         // According to precedent, the __get__ method is special-cased and is
         // exempt from overlapping overload checks. It's not clear why this is
         // the case, but for consistency with other type checkers, we'll honor
         // this rule. See https://github.com/python/typing/issues/253#issuecomment-389262904
         // for details.
-        if (FunctionType.isInstanceMethod(functionType) && functionType.shared.name === '__get__') {
+        if (
+            isFunction(callableType) &&
+            FunctionType.isInstanceMethod(callableType) &&
+            callableType.shared.name === '__get__'
+        ) {
             return false;
         }
 
@@ -2729,10 +2756,10 @@ export class Checker extends ParseTreeWalker {
             flags |= AssignTypeFlags.PartialOverloadOverlap;
         }
 
-        const functionNode = functionType.shared.declaration?.node;
+        const functionNode = callableType.shared.declaration?.node;
         if (functionNode) {
             const liveTypeVars = ParseTreeUtils.getTypeVarScopesForNode(functionNode);
-            functionType = makeTypeVarsBound(functionType, liveTypeVars);
+            callableType = makeTypeVarsBound(callableType, liveTypeVars);
         }
 
         // Use the parent node of the declaration in this case so we don't transform
@@ -2744,7 +2771,7 @@ export class Checker extends ParseTreeWalker {
         }
 
         return this._evaluator.assignType(
-            functionType,
+            callableType,
             prevOverload,
             /* diag */ undefined,
             /* constraints */ undefined,
@@ -2757,8 +2784,8 @@ export class Checker extends ParseTreeWalker {
     // of the same arguments as the overload and return a type that is consistent
     // with the overload's return type.
     private _validateOverloadImplementation(
-        overload: FunctionType,
-        implementation: FunctionType,
+        overload: CallableType,
+        implementation: CallableType,
         diag: DiagnosticAddendum | undefined
     ): boolean {
         const constraints = new ConstraintTracker(this._evaluator);
@@ -2788,18 +2815,28 @@ export class Checker extends ParseTreeWalker {
         );
 
         // Now check the return types.
-        const overloadReturnType = this._evaluator.solveAndApplyConstraints(
-            FunctionType.getEffectiveReturnType(overloadBound) ??
-                this._evaluator.getFunctionInferredReturnType(overloadBound),
-            constraints
-        );
-        const implReturnType = this._evaluator.solveAndApplyConstraints(
-            FunctionType.getEffectiveReturnType(implBound) ?? this._evaluator.getFunctionInferredReturnType(implBound),
-            constraints
-        );
+        const overloadBoundFunctionType = this._evaluator.getFunctionTypeOfCallable(overloadBound);
+        const overloadReturnType = overloadBoundFunctionType
+            ? this._evaluator.solveAndApplyConstraints(
+                  FunctionType.getEffectiveReturnType(overloadBoundFunctionType) ??
+                      this._evaluator.getFunctionInferredReturnType(overloadBoundFunctionType),
+                  constraints
+              )
+            : undefined;
+
+        const implBoundFunctionType = this._evaluator.getFunctionTypeOfCallable(implBound);
+        const implReturnType = implBoundFunctionType
+            ? this._evaluator.solveAndApplyConstraints(
+                  FunctionType.getEffectiveReturnType(implBoundFunctionType) ??
+                      this._evaluator.getFunctionInferredReturnType(implBoundFunctionType),
+                  constraints
+              )
+            : undefined;
 
         const returnDiag = new DiagnosticAddendum();
         if (
+            !!overloadReturnType &&
+            !!implReturnType &&
             !isNever(overloadReturnType) &&
             !this._evaluator.assignType(
                 implReturnType,
@@ -3121,7 +3158,7 @@ export class Checker extends ParseTreeWalker {
         const type = this._evaluator.getEffectiveTypeOfSymbol(symbol);
         const overloads = isOverloaded(type)
             ? OverloadedType.getOverloads(type)
-            : isFunction(type) && FunctionType.isOverloaded(type)
+            : (isFunction(type) && FunctionType.isOverloaded(type)) || (isClass(type) && ClassType.isOverloaded(type))
             ? [type]
             : [];
 
@@ -3158,7 +3195,10 @@ export class Checker extends ParseTreeWalker {
 
         if (isOverloaded(type)) {
             implementation = OverloadedType.getImplementation(type);
-        } else if (isFunction(type) && !FunctionType.isOverloaded(type)) {
+        } else if (
+            (isFunction(type) && !FunctionType.isOverloaded(type)) ||
+            (isClass(type) && !ClassType.isOverloaded(type))
+        ) {
             implementation = type;
         }
 
@@ -3174,8 +3214,8 @@ export class Checker extends ParseTreeWalker {
                     if (ClassType.supportsAbstractMethods(classType.classType)) {
                         if (
                             isOverloaded(type) &&
-                            OverloadedType.getOverloads(type).every((overload) =>
-                                FunctionType.isAbstractMethod(overload)
+                            OverloadedType.getOverloads(type).every(
+                                (overload) => isFunction(overload) && FunctionType.isAbstractMethod(overload)
                             )
                         ) {
                             return;
@@ -6231,7 +6271,7 @@ export class Checker extends ParseTreeWalker {
         });
     }
 
-    private _validateOverloadAbstractConsistency(overloads: FunctionType[], implementation: Type | undefined) {
+    private _validateOverloadAbstractConsistency(overloads: CallableType[], implementation: Type | undefined) {
         // If there's an implementation, it will determine whether the
         // function is abstract.
         if (implementation && isFunction(implementation)) {
@@ -6243,7 +6283,7 @@ export class Checker extends ParseTreeWalker {
             overloads.forEach((overload) => {
                 const decl = overload.shared.declaration;
 
-                if (FunctionType.isAbstractMethod(overload) && decl) {
+                if (isFunction(overload) && FunctionType.isAbstractMethod(overload) && decl) {
                     this._evaluator.addDiagnostic(
                         DiagnosticRule.reportInconsistentOverload,
                         LocMessage.overloadAbstractImplMismatch().format({
@@ -6262,10 +6302,14 @@ export class Checker extends ParseTreeWalker {
 
         // If there was no implementation, make sure all overloads are either
         // abstract or not abstract.
-        const isFirstOverloadAbstract = FunctionType.isAbstractMethod(overloads[0]);
+        const isFirstOverloadAbstract = isFunction(overloads[0]) && FunctionType.isAbstractMethod(overloads[0]);
 
         overloads.slice(1).forEach((overload, index) => {
-            if (FunctionType.isAbstractMethod(overload) !== isFirstOverloadAbstract && overload.shared.declaration) {
+            if (
+                isFunction(overload) &&
+                FunctionType.isAbstractMethod(overload) !== isFirstOverloadAbstract &&
+                overload.shared.declaration
+            ) {
                 this._evaluator.addDiagnostic(
                     DiagnosticRule.reportInconsistentOverload,
                     LocMessage.overloadAbstractMismatch().format({
@@ -6277,7 +6321,7 @@ export class Checker extends ParseTreeWalker {
         });
     }
 
-    private _validateOverloadFinalConsistency(overloads: FunctionType[], implementation: Type | undefined) {
+    private _validateOverloadFinalConsistency(overloads: CallableType[], implementation: Type | undefined) {
         // If there's an implementation, it will determine whether the
         // function is @final.
         if (implementation && isFunction(implementation)) {
@@ -6285,7 +6329,7 @@ export class Checker extends ParseTreeWalker {
             // implementation is not, report an error.
             if (!FunctionType.isFinal(implementation)) {
                 overloads.forEach((overload) => {
-                    if (FunctionType.isFinal(overload) && overload.shared.declaration?.node) {
+                    if (isFunction(overload) && FunctionType.isFinal(overload) && overload.shared.declaration?.node) {
                         this._evaluator.addDiagnostic(
                             DiagnosticRule.reportInconsistentOverload,
                             LocMessage.overloadFinalInconsistencyImpl().format({
@@ -6299,9 +6343,9 @@ export class Checker extends ParseTreeWalker {
             return;
         }
 
-        if (overloads.length > 0 && !FunctionType.isFinal(overloads[0])) {
+        if (overloads.length > 0 && isFunction(overloads[0]) && !FunctionType.isFinal(overloads[0])) {
             overloads.slice(1).forEach((overload, index) => {
-                if (FunctionType.isFinal(overload) && overload.shared.declaration?.node) {
+                if (isFunction(overload) && FunctionType.isFinal(overload) && overload.shared.declaration?.node) {
                     this._evaluator.addDiagnostic(
                         DiagnosticRule.reportInconsistentOverload,
                         LocMessage.overloadFinalInconsistencyNoImpl().format({
@@ -6670,7 +6714,7 @@ export class Checker extends ParseTreeWalker {
                     const overloads = OverloadedType.getOverloads(baseType);
                     const impl = OverloadedType.getImplementation(baseType);
 
-                    if (overloads.some((overload) => FunctionType.isFinal(overload))) {
+                    if (overloads.some((overload) => isFunction(overload) && FunctionType.isFinal(overload))) {
                         reportFinalMethodOverride = true;
                     }
 
