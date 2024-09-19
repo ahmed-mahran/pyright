@@ -306,3 +306,20 @@ Similar PEP drafts:
 
 - [A Map Operator for Variadic Type Variables](https://docs.google.com/document/d/1szTVcFyLznoDT7phtT-6Fpvp27XaBw9DmbTLHrB6BE4/edit).
 - [Type Transformations on Variadic Generics](https://discuss.python.org/t/pre-pep-considerations-and-feedback-type-transformations-on-variadic-generics/50605).
+
+# Publishing on VSCode Marketplace
+
+**TL;DR** VSCode marketplace has removed the extension and locked my account without notice.
+
+- [2024-08-22] Published first version on VSCode.
+- [2024-09-11] Last successfully published version. I've received a confirmation email
+
+  > Extension validation is complete for your extension MyPyright (mashin.mypyright). No issues were observed and the version 1.3.0 is available for use in Visual Studio Marketplace.
+
+- [2024-09-16] I opened an issue on original repo [microsoft#9010](https://github.com/microsoft/pyright/issues/9010) with suggested approach [PR#1](https://github.com/ahmed-mahran/mypyright/pull/1).
+
+- [2024-09-18] I found by chance that `MyPyright` extension is no longer available on VSCode marketplace and my account has got rate-limited and I no longer can open the marketplace using my account.
+
+- [2024-09-19] After emailing the support team, I received this response:
+
+  > We have locked the extension after a thorough investigation due to security and privacy concerns.
