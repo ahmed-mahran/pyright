@@ -366,7 +366,10 @@ export class ConstraintTracker {
 
     addCombinedConstraints(allConstraints: ConstraintTracker[]) {
         const combinedConstraints = ConstraintTracker.combine(allConstraints);
-        this.addConstraintSets(combinedConstraints?._constraintSets ?? []);
+        const constraintSets = combinedConstraints?._constraintSets ?? [];
+        if (constraintSets.length > 0) {
+            this.addConstraintSets(combinedConstraints?._constraintSets ?? []);
+        }
     }
 
     static combine(allConstraints: ConstraintTracker[]): ConstraintTracker | undefined {

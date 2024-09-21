@@ -25339,7 +25339,7 @@ export function createTypeEvaluator(
                 return;
             }
 
-            const subtypeConstraints = constraints ? constraints.clone() : undefined;
+            const subtypeConstraints = !constraints || constraints.isLocked() ? constraints : constraints.clone();
 
             if (!assignType(destType, subtype, /* diag */ undefined, subtypeConstraints, flags, recursionCount)) {
                 // Determine if the current subtype is subsumed by another subtype
