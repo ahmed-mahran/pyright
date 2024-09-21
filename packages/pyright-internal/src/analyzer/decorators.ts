@@ -411,12 +411,21 @@ function getTypeOfDecorator(evaluator: TypeEvaluator, node: DecoratorNode, funct
         },
     ];
 
+    let isArgAssignmentCovariant: boolean | undefined;
+    if (
+        isClass(decoratorTypeResult.type) &&
+        decoratorTypeResult.type.shared.fullName === 'mypyright_extensions.subscriptable'
+    ) {
+        isArgAssignmentCovariant = true;
+    }
+
     const callTypeResult = evaluator.validateCallArgs(
         node.d.expr,
         argList,
         decoratorTypeResult,
         /* constraints */ undefined,
         /* skipUnknownArgCheck */ true,
+        isArgAssignmentCovariant,
         /* inferenceContext */ undefined
     );
 

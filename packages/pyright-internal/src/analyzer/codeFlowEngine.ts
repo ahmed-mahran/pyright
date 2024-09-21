@@ -1818,6 +1818,7 @@ export function getCodeFlowEngine(
                                 { type: callSubtype, isIncomplete: callTypeResult.isIncomplete },
                                 /* constraints */ undefined,
                                 /* skipUnknownArgCheck */ false,
+                                /* isArgAssignmentCovariant */ false,
                                 /* inferenceContext */ undefined
                             );
 

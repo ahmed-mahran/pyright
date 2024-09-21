@@ -596,6 +596,10 @@ export const enum AssignTypeFlags {
     // Normally a protocol class object cannot be used as a source type. This
     // option overrides this behavior.
     AllowProtocolClassSource = 1 << 16,
+
+    // This is initially used by subscriptable functions to get
+    // around the fact that parameters are in contravariant position.
+    ArgAssignmentCovariant = 1 << 17,
 }
 
 export interface TypeEvaluator {
@@ -645,6 +649,7 @@ export interface TypeEvaluator {
         typeResult: TypeResult<OverloadedType>,
         constraints: ConstraintTracker | undefined,
         skipUnknownArgCheck: boolean,
+        isArgAssignmentCovariant: boolean,
         inferenceContext: InferenceContext | undefined
     ) => CallResult;
     validateInitSubclassArgs: (node: ClassNode, classType: ClassType) => void;
@@ -771,6 +776,7 @@ export interface TypeEvaluator {
         callTypeResult: TypeResult,
         constraints: ConstraintTracker | undefined,
         skipUnknownArgCheck: boolean | undefined,
+        isArgsAssignmentCovariant: boolean | undefined,
         inferenceContext: InferenceContext | undefined
     ) => CallResult;
     validateTypeArg: (argResult: TypeResultWithNode, options?: ValidateTypeArgsOptions) => boolean;
