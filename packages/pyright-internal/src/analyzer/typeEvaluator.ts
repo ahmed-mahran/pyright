@@ -209,6 +209,7 @@ import {
     ResolveAliasOptions,
     SolveConstraintsOptions,
     SymbolDeclInfo,
+    SynthesizedTypeInfo,
     TypeEvaluator,
     TypeResult,
     TypeResultWithNode,
@@ -656,6 +657,7 @@ export function createTypeEvaluator(
     let intClass: Type | undefined;
     let strClass: Type | undefined;
     let dictClass: Type | undefined;
+    let moduleTypeClass: Type | undefined;
     let typedDictPrivateClass: Type | undefined;
     let supportsKeysAndGetItemClass: Type | undefined;
     let mappingClass: Type | undefined;
@@ -1005,6 +1007,7 @@ export function createTypeEvaluator(
             intClass = getBuiltInType(node, 'int');
             strClass = getBuiltInType(node, 'str');
             dictClass = getBuiltInType(node, 'dict');
+            moduleTypeClass = getTypingType(node, 'ModuleType');
             typedDictPrivateClass = getTypingType(node, '_TypedDict');
             awaitableClass = getTypingType(node, 'Awaitable');
             mappingClass = getTypingType(node, 'Mapping');
@@ -2769,6 +2772,7 @@ export function createTypeEvaluator(
     // Determines whether the specified expression is a symbol with a declared type.
     function getDeclaredTypeForExpression(expression: ExpressionNode, usage?: EvaluatorUsage): Type | undefined {
         let symbol: Symbol | undefined;
+        let selfType: ClassType | TypeVarType | undefined;
         let classOrObjectBase: ClassType | undefined;
         let memberAccessClass: Type | undefined;
         let bindFunction = true;
@@ -2812,23 +2816,22 @@ export function createTypeEvaluator(
             }
 
             case ParseNodeType.MemberAccess: {
-                const baseType = makeTopLevelTypeVarsConcrete(
-                    getTypeOfExpression(
-                        expression.d.leftExpr,
-                        EvalFlags.MemberAccessBaseDefaults,
-                        /* constraints */ undefined
-                    ).type
-                );
+                const baseType = getTypeOfExpression(
+                    expression.d.leftExpr,
+                    EvalFlags.MemberAccessBaseDefaults,
+                    /* constraints */ undefined
+                ).type;
+                const baseTypeConcrete = makeTopLevelTypeVarsConcrete(baseType);
                 let classMemberInfo: ClassMember | undefined;
 
-                if (isClassInstance(baseType)) {
+                if (isClassInstance(baseTypeConcrete)) {
                     classMemberInfo = lookUpObjectMember(
                         evaluatorInterface,
-                        baseType,
+                        baseTypeConcrete,
                         expression.d.member.d.value,
                         MemberAccessFlags.DeclaredTypesOnly
                     );
-                    classOrObjectBase = baseType;
+                    classOrObjectBase = baseTypeConcrete;
                     memberAccessClass = classMemberInfo?.classType;
 
                     // If this is an instance member (e.g. a dataclass field), don't
@@ -2838,15 +2841,19 @@ export function createTypeEvaluator(
                     }
 
                     useDescriptorSetterType = true;
-                } else if (isInstantiableClass(baseType)) {
+                } else if (isInstantiableClass(baseTypeConcrete)) {
                     classMemberInfo = lookUpClassMember(
                         evaluatorInterface,
-                        baseType,
+                        baseTypeConcrete,
                         expression.d.member.d.value,
                         MemberAccessFlags.SkipInstanceMembers | MemberAccessFlags.DeclaredTypesOnly
                     );
-                    classOrObjectBase = baseType;
+                    classOrObjectBase = baseTypeConcrete;
                     memberAccessClass = classMemberInfo?.classType;
+                }
+
+                if (isTypeVar(baseType)) {
+                    selfType = baseType;
                 }
 
                 if (classMemberInfo) {
@@ -2905,13 +2912,20 @@ export function createTypeEvaluator(
                             evaluatorInterface,
                             declaredType,
                             memberAccessClass,
-                            getTypeClassType()
+                            getTypeClassType(),
+                            selfType
                         );
                     }
 
                     if (isFunction(declaredType) || isOverloaded(declaredType)) {
                         if (bindFunction) {
-                            declaredType = bindFunctionToClassOrObject(classOrObjectBase, declaredType);
+                            declaredType = bindFunctionToClassOrObject(
+                                classOrObjectBase,
+                                declaredType,
+                                /* memberClass */ undefined,
+                                /* treatConstructorAsClassMethod */ undefined,
+                                selfType
+                            );
                         }
                     }
                 }
@@ -4967,12 +4981,17 @@ export function createTypeEvaluator(
 
     // If the value is a special form (like a TypeVar or `Any`) and is being
     // evaluated in a value expression context, convert it from its special
-    // meaning to its runtime value.
-    function convertSpecialFormToRuntimeValue(type: Type, flags: EvalFlags) {
+    // meaning to its runtime value. If convertModule is true, a module is
+    // converted to an instance of types.ModuleType.
+    function convertSpecialFormToRuntimeValue(type: Type, flags: EvalFlags, convertModule = false) {
         const exemptFlags = EvalFlags.TypeExpression | EvalFlags.InstantiableType | EvalFlags.NoConvertSpecialForm;
 
         if ((flags & exemptFlags) !== 0) {
             return type;
+        }
+
+        if (convertModule && isModule(type) && moduleTypeClass && isInstantiableClass(moduleTypeClass)) {
+            return ClassType.cloneAsInstance(moduleTypeClass);
         }
 
         // Isinstance treats traditional (non-PEP 695) type aliases that are unions
@@ -6429,12 +6448,14 @@ export function createTypeEvaluator(
             accessMethodName = '__delete__';
         }
 
+        const subDiag = diag ? new DiagnosticAddendum() : undefined;
+
         const methodTypeResult = getTypeOfBoundMember(
             errorNode,
             concreteMemberType,
             accessMethodName,
             /* usage */ undefined,
-            diag?.createAddendum(),
+            subDiag,
             MemberAccessFlags.SkipInstanceMembers | MemberAccessFlags.SkipAttributeAccessOverride
         );
 
@@ -6458,6 +6479,9 @@ export function createTypeEvaluator(
         let methodType = methodTypeResult.type;
 
         if (methodTypeResult.typeErrors || !methodClassType) {
+            if (diag && subDiag) {
+                diag.addAddendum(subDiag);
+            }
             return { type: UnknownType.create(), typeErrors: true };
         }
 
@@ -8504,7 +8528,11 @@ export function createTypeEvaluator(
             } else if (isNever(typeResult.type) && typeResult.isIncomplete && !typeResult.unpackedType) {
                 entryTypes.push({ type: UnknownType.create(/* isIncomplete */ true), isUnbounded: false });
             } else {
-                let entryType = convertSpecialFormToRuntimeValue(typeResult.type, EvalFlags.None);
+                let entryType = convertSpecialFormToRuntimeValue(
+                    typeResult.type,
+                    EvalFlags.None,
+                    /* convertModule */ true
+                );
                 entryType = stripLiterals ? stripTypeForm(stripLiteralValue(entryType)) : entryType;
                 entryTypes.push({ type: entryType, isUnbounded: !!typeResult.unpackedType });
             }
@@ -10380,7 +10408,8 @@ export function createTypeEvaluator(
                 // The one-parameter form of "type" returns the class
                 // for the specified object.
                 if (expandedCallType.shared.name === 'type' && argList.length === 1) {
-                    const argType = getTypeOfArg(argList[0], /* inferenceContext */ undefined).type;
+                    const argTypeResult = getTypeOfArg(argList[0], /* inferenceContext */ undefined);
+                    const argType = argTypeResult.type;
                     const returnType = mapSubtypes(argType, (subtype) => {
                         if (isNever(subtype)) {
                             return subtype;
@@ -10401,7 +10430,7 @@ export function createTypeEvaluator(
                         ]);
                     });
 
-                    return { returnType };
+                    return { returnType, isTypeIncomplete: argTypeResult.isIncomplete };
                 }
 
                 if (argList.length >= 2) {
@@ -14063,10 +14092,10 @@ export function createTypeEvaluator(
 
         // Strip any literal values and TypeForm types.
         const keyTypes = keyTypeResults.map((t) =>
-            stripTypeForm(convertSpecialFormToRuntimeValue(stripLiteralValue(t.type), flags))
+            stripTypeForm(convertSpecialFormToRuntimeValue(stripLiteralValue(t.type), flags, /* convertModule */ true))
         );
         const valueTypes = valueTypeResults.map((t) =>
-            stripTypeForm(convertSpecialFormToRuntimeValue(stripLiteralValue(t.type), flags))
+            stripTypeForm(convertSpecialFormToRuntimeValue(stripLiteralValue(t.type), flags, /* convertModule */ true))
         );
 
         keyType = keyTypes.length > 0 ? combineTypes(keyTypes) : fallbackType;
@@ -14619,7 +14648,9 @@ export function createTypeEvaluator(
                 );
             }
 
-            entryTypeResult.type = stripTypeForm(convertSpecialFormToRuntimeValue(entryTypeResult.type, flags));
+            entryTypeResult.type = stripTypeForm(
+                convertSpecialFormToRuntimeValue(entryTypeResult.type, flags, /* convertModule */ true)
+            );
 
             if (entryTypeResult.isIncomplete) {
                 isIncomplete = true;
@@ -19249,7 +19280,11 @@ export function createTypeEvaluator(
             }
 
             if (!skipInference) {
-                inferredParamType = convertSpecialFormToRuntimeValue(defaultValueType, EvalFlags.None);
+                inferredParamType = convertSpecialFormToRuntimeValue(
+                    defaultValueType,
+                    EvalFlags.None,
+                    /* convertModule */ true
+                );
                 inferredParamType = stripTypeForm(inferredParamType);
                 inferredParamType = stripLiteralValue(inferredParamType);
             }
@@ -21866,7 +21901,7 @@ export function createTypeEvaluator(
         }
 
         const declarations: Declaration[] = [];
-        const synthesizedTypes: Type[] = [];
+        const synthesizedTypes: SynthesizedTypeInfo[] = [];
 
         // If the node is part of a "from X import Y as Z" statement and the node
         // is the "Y" (non-aliased) name, we need to look up the alias symbol
@@ -21953,7 +21988,7 @@ export function createTypeEvaluator(
                         } else {
                             const synthesizedType = symbol.getSynthesizedType();
                             if (synthesizedType) {
-                                synthesizedTypes.push(synthesizedType);
+                                synthesizedTypes.push({ type: synthesizedType, node });
                             } else {
                                 appendArray(declarations, symbol.getDeclarations());
                             }
@@ -23368,7 +23403,11 @@ export function createTypeEvaluator(
 
                         if (stripLiteralArgTypes) {
                             paramType = stripTypeForm(
-                                convertSpecialFormToRuntimeValue(stripLiteralValue(paramType), EvalFlags.None)
+                                convertSpecialFormToRuntimeValue(
+                                    stripLiteralValue(paramType),
+                                    EvalFlags.None,
+                                    /* convertModule */ true
+                                )
                             );
                         }
 

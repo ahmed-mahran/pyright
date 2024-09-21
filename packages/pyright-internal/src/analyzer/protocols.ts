@@ -719,7 +719,7 @@ function assignToProtocolInternal(
                 destPrimaryDecl?.type === DeclarationType.Variable &&
                 srcPrimaryDecl?.type === DeclarationType.Variable
             ) {
-                const isDestReadOnly = !!destPrimaryDecl.isConstant;
+                const isDestReadOnly = !!destPrimaryDecl.isConstant || !!destPrimaryDecl.isFinal;
                 let isSrcReadOnly = !!srcPrimaryDecl.isConstant;
                 if (srcMemberInfo && isClass(srcMemberInfo.classType)) {
                     if (srcMemberInfo.isReadOnly) {
