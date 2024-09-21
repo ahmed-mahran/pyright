@@ -233,6 +233,7 @@ import {
     InheritanceChain,
     isAny,
     isAnyOrUnknown,
+    isCallable,
     isClass,
     isClassInstance,
     isFunction,
@@ -24825,11 +24826,22 @@ export function createTypeEvaluator(
                 }
 
                 return true;
-            } else if (isFunction(concreteSrcType) || isOverloaded(concreteSrcType)) {
+            } else if (
+                isFunction(concreteSrcType) ||
+                (isClass(concreteSrcType) && ClassType.isCallable(concreteSrcType)) ||
+                isOverloaded(concreteSrcType)
+            ) {
                 // Is the destination a callback protocol (defined in PEP 544)?
                 const destCallbackType = getCallbackProtocolType(destType, recursionCount);
                 if (destCallbackType) {
                     return assignType(destCallbackType, concreteSrcType, diag, constraints, flags, recursionCount);
+                }
+
+                const destFunctionType = ClassType.isCallable(destType)
+                    ? getFunctionTypeOfCallable(destType)
+                    : undefined;
+                if (destFunctionType) {
+                    return assignType(destFunctionType, concreteSrcType, diag, constraints, flags, recursionCount);
                 }
 
                 // All functions are considered instances of "builtins.function".
@@ -24987,11 +24999,13 @@ export function createTypeEvaluator(
                 return true;
             }
 
-            if (isFunction(concreteSrcType)) {
+            if (isCallable(concreteSrcType)) {
+                const concreteSrcTypeFunction = getFunctionTypeOfCallable(concreteSrcType);
                 if (
+                    concreteSrcTypeFunction &&
                     assignFunction(
                         destType,
-                        concreteSrcType,
+                        concreteSrcTypeFunction,
                         diag?.createAddendum(),
                         constraints ?? new ConstraintTracker(evaluatorInterface),
                         flags,
