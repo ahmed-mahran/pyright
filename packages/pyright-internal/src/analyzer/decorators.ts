@@ -144,6 +144,10 @@ export function applyFunctionDecorator(
     const decoratorTypeResult = evaluator.getTypeOfExpression(decoratorNode.d.expr, evaluatorFlags);
     const decoratorType = decoratorTypeResult.type;
 
+    if (isFunction(decoratorType) || isClass(decoratorType)) {
+        decoratorType.priv.decoratedType = inputFunctionType;
+    }
+
     // Special-case the "overload" because it has no definition. Older versions of typeshed
     // defined "overload" as an object, but newer versions define it as a function.
     if (
@@ -299,6 +303,10 @@ export function applyClassDecorator(
     }
     const decoratorType = evaluator.getTypeOfExpression(decoratorNode.d.expr, flags).type;
 
+    if (isFunction(decoratorType) || isClass(decoratorType)) {
+        decoratorType.priv.decoratedType = inputClassType;
+    }
+
     if (decoratorNode.d.expr.nodeType === ParseNodeType.Call) {
         const decoratorCallType = evaluator.getTypeOfExpression(
             decoratorNode.d.expr.d.leftExpr,
@@ -392,6 +400,10 @@ function getTypeOfDecorator(evaluator: TypeEvaluator, node: DecoratorNode, funct
     }
 
     const decoratorTypeResult = evaluator.getTypeOfExpression(node.d.expr, flags);
+
+    if (isFunction(decoratorTypeResult.type) || isClass(decoratorTypeResult.type)) {
+        decoratorTypeResult.type.priv.decoratedType = functionOrClassType;
+    }
 
     // Special-case the combination of a classmethod decorator applied
     // to a property. This is allowed in Python 3.9, but it's not reflected

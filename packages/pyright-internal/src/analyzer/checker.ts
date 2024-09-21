@@ -154,6 +154,7 @@ import {
     Variance,
     combineTypes,
     isAnyOrUnknown,
+    isCallable,
     isClass,
     isClassInstance,
     isFunction,
@@ -3250,17 +3251,20 @@ export class Checker extends ParseTreeWalker {
             const diag = new DiagnosticAddendum();
             if (
                 implementation &&
-                isFunction(implementation) &&
+                isCallable(implementation) &&
                 !this._validateOverloadImplementation(overload, implementation, diag)
             ) {
-                if (implementation!.shared.declaration) {
+                const originalImpl = CallableType.getUndecoratedType(implementation);
+                if (isCallable(originalImpl) && originalImpl.shared.declaration) {
                     const diagnostic = this._evaluator.addDiagnostic(
                         DiagnosticRule.reportInconsistentOverload,
                         LocMessage.overloadImplementationMismatch().format({
                             name,
                             index: index + 1,
                         }) + diag.getString(),
-                        implementation!.shared.declaration.node.d.name
+                        isFunction(originalImpl)
+                            ? originalImpl.shared.declaration.node.d.name
+                            : originalImpl.shared.declaration.node
                     );
 
                     if (diagnostic && overload.shared.declaration) {

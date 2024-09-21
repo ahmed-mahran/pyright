@@ -837,11 +837,15 @@ export interface ClassDetailsPriv {
     // as decorators for other classes or functions.
     deprecatedInstanceMessage?: string | undefined;
 
-    // If this class is part of an overloaded function, this
-    // refers back to the overloaded function type.
+    // If this class is a callable class and part of an overloaded function,
+    // this refers back to the overloaded function type.
     overloaded?: OverloadedType;
-    // Class is decorated with @overload
+    // Class is decorated with @overload, this happens when this
+    // class decorates a function that itself is decorated with @overload.
     isOverloaded?: boolean;
+    // If this class is used in a decoration chain, this referes to the
+    // previous decorated class/function of the chain.
+    decoratedType?: Type | undefined;
 }
 
 export interface ClassType extends TypeBase<TypeCategory.Class> {
@@ -1741,6 +1745,10 @@ export interface FunctionDetailsPriv {
     // type arguments? This allows us to detect and report an error
     // when this is used in an isinstance call.
     isCallableWithTypeArgs?: boolean;
+
+    // If this function is used in a decoration chain, this referes to the
+    // previous decorated class/function of the chain.
+    decoratedType?: Type | undefined;
 }
 
 export interface FunctionType extends TypeBase<TypeCategory.Function> {
@@ -2355,7 +2363,18 @@ export namespace FunctionType {
     }
 }
 
+//TODO maybe rename to DecoratableType
 export type CallableType = FunctionType | ClassType;
+
+export namespace CallableType {
+    export function getUndecoratedType(type: CallableType): Type {
+        return type.priv.decoratedType
+            ? isCallable(type.priv.decoratedType)
+                ? getUndecoratedType(type.priv.decoratedType)
+                : type.priv.decoratedType
+            : type;
+    }
+}
 
 export interface OverloadedDetailsPriv {
     // eslint-disable-next-line @typescript-eslint/naming-convention
