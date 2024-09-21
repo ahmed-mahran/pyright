@@ -2496,8 +2496,8 @@ export function createTypeEvaluator(
                     if (constructorType) {
                         return getFunctionType(constructorType);
                     }
-                } else {
-                    const methodType = getBoundMagicMethod(type, '__call__');
+                } else if (ClassType.isCallable(type)) {
+                    const methodType = getBoundMagicMethod(type, '__call__', type);
                     if (methodType) {
                         return getFunctionType(methodType);
                     }
@@ -24759,7 +24759,12 @@ export function createTypeEvaluator(
             }
 
             let concreteSrcType = makeTopLevelTypeVarsConcrete(srcType);
-            if (isClass(concreteSrcType) && TypeBase.isInstance(concreteSrcType)) {
+            if (
+                isClass(concreteSrcType) &&
+                TypeBase.isInstance(concreteSrcType) &&
+                !ClassType.isCallable(destType) &&
+                !ClassType.isCallable(concreteSrcType)
+            ) {
                 // Handle enum literals that are assignable to another (non-Enum) literal.
                 // This can happen for IntEnum and StrEnum members.
                 if (
@@ -27813,7 +27818,7 @@ export function createTypeEvaluator(
                             : firstParamType
                     );
                 }
-            } else {
+            } else if (!isTypeSame(memberTypeFirstParamType, firstParamType)) {
                 const subDiag = diag?.createAddendum();
 
                 if (
