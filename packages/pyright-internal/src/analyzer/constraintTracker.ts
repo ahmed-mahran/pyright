@@ -380,6 +380,7 @@ export class ConstraintTracker {
                 'All constraints must have the same number of sets'
             );
             const result = new ConstraintTracker(allConstraints[0]._evaluator);
+            result._constraintSets = [];
             for (let i = 0; i < firstConstraints.length; i++) {
                 const combinedSet = ConstraintSet.combine(
                     allConstraints.map((constraints) => constraints._constraintSets[i])
