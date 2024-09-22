@@ -3900,13 +3900,17 @@ export function combineTypes(subtypes: Type[], options?: CombineTypesOptions): T
     }
 
     let hitMaxSubtypeCount = false;
+    let isMapped = false;
 
     expandedTypes.forEach((subtype, index) => {
         if (index === 0) {
             UnionType.addType(newUnionType, subtype as UnionableType);
+            isMapped = MyPyrightExtensions.isMappedType(subtype);
         } else {
             if (options?.maxSubtypeCount === undefined || newUnionType.priv.subtypes.length < options.maxSubtypeCount) {
-                _addTypeIfUnique(newUnionType, subtype as UnionableType, !options?.skipElideRedundantLiterals);
+                if (_addTypeIfUnique(newUnionType, subtype as UnionableType, !options?.skipElideRedundantLiterals)) {
+                    isMapped &&= MyPyrightExtensions.isMappedType(subtype);
+                }
             } else {
                 hitMaxSubtypeCount = true;
             }
@@ -3920,6 +3924,10 @@ export function combineTypes(subtypes: Type[], options?: CombineTypesOptions): T
     // If only one type remains, convert it from a union to a simple type.
     if (newUnionType.priv.subtypes.length === 1) {
         return newUnionType.priv.subtypes[0];
+    }
+
+    if (isMapped) {
+        MyPyrightExtensions.setFlagMapped(newUnionType);
     }
 
     return newUnionType;
@@ -3965,8 +3973,9 @@ function _addTypeIfUnique(unionType: UnionType, typeToAdd: UnionableType, elideR
         ) {
             if (!literalMaps.literalStrMap.has(typeToAdd.priv.literalValue as string)) {
                 UnionType.addType(unionType, typeToAdd);
+                return true;
             }
-            return;
+            return false;
         } else if (
             ClassType.isBuiltIn(typeToAdd, 'int') &&
             typeToAdd.priv.literalValue !== undefined &&
@@ -3974,8 +3983,9 @@ function _addTypeIfUnique(unionType: UnionType, typeToAdd: UnionableType, elideR
         ) {
             if (!literalMaps.literalIntMap.has(typeToAdd.priv.literalValue as number | bigint)) {
                 UnionType.addType(unionType, typeToAdd);
+                return true;
             }
-            return;
+            return false;
         } else if (
             ClassType.isEnumClass(typeToAdd) &&
             typeToAdd.priv.literalValue !== undefined &&
@@ -3984,8 +3994,9 @@ function _addTypeIfUnique(unionType: UnionType, typeToAdd: UnionableType, elideR
             const enumLiteral = typeToAdd.priv.literalValue as EnumLiteral;
             if (!literalMaps.literalEnumMap.has(enumLiteral.getName())) {
                 UnionType.addType(unionType, typeToAdd);
+                return true;
             }
-            return;
+            return false;
         }
     }
 
@@ -3996,7 +4007,7 @@ function _addTypeIfUnique(unionType: UnionType, typeToAdd: UnionableType, elideR
 
         // Does this type already exist in the types array?
         if (isTypeSame(type, typeToAdd, { honorTypeForm: true })) {
-            return;
+            return false;
         }
 
         // Handle the case where pseudo-generic classes with different
@@ -4011,7 +4022,7 @@ function _addTypeIfUnique(unionType: UnionType, typeToAdd: UnionableType, elideR
                     typeToAdd,
                     typeToAdd.shared.typeParams.map(() => UnknownType.create())
                 );
-                return;
+                return false;
             }
         }
 
@@ -4020,7 +4031,7 @@ function _addTypeIfUnique(unionType: UnionType, typeToAdd: UnionableType, elideR
             // a non-literal type that matches, don't add the literal value.
             if (elideRedundantLiterals && isSameWithoutLiteralValue(type, typeToAdd)) {
                 if (type.priv.literalValue === undefined) {
-                    return;
+                    return false;
                 }
             }
 
@@ -4037,7 +4048,7 @@ function _addTypeIfUnique(unionType: UnionType, typeToAdd: UnionableType, elideR
                     !typeToAdd.priv.literalValue === type.priv.literalValue
                 ) {
                     unionType.priv.subtypes[i] = ClassType.cloneWithLiteral(type, /* value */ undefined);
-                    return;
+                    return false;
                 }
             }
 
@@ -4047,10 +4058,10 @@ function _addTypeIfUnique(unionType: UnionType, typeToAdd: UnionableType, elideR
                 // Do not proceed if the TypedDicts are generic and have different type arguments.
                 if (!type.priv.typeArgs && !typeToAdd.priv.typeArgs) {
                     if (ClassType.isTypedDictNarrower(typeToAdd, type)) {
-                        return;
+                        return false;
                     } else if (ClassType.isTypedDictNarrower(type, typeToAdd)) {
                         unionType.priv.subtypes[i] = typeToAdd;
-                        return;
+                        return false;
                     }
                 }
             }
@@ -4060,10 +4071,11 @@ function _addTypeIfUnique(unionType: UnionType, typeToAdd: UnionableType, elideR
         // non-empty container of the same type, don't add the empty container.
         if (isClassInstance(typeToAdd) && typeToAdd.priv.isEmptyContainer) {
             if (isClassInstance(type) && ClassType.isSameGenericClass(type, typeToAdd)) {
-                return;
+                return false;
             }
         }
     }
 
     UnionType.addType(unionType, typeToAdd);
+    return true;
 }
