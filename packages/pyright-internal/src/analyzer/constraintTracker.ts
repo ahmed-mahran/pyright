@@ -223,7 +223,7 @@ export class ConstraintSet {
                 }
             }
             return result;
-        } else if (allSets.length === 0) {
+        } else if (allSets.length === 1) {
             return allSets[0];
         } else {
             return undefined;
@@ -391,7 +391,7 @@ export class ConstraintTracker {
             }
             result._isLocked = allConstraints.some((constraints) => constraints._isLocked);
             return result;
-        } else if (allConstraints.length === 0) {
+        } else if (allConstraints.length === 1) {
             return allConstraints[0];
         } else {
             return undefined;
