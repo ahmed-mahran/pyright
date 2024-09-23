@@ -114,6 +114,7 @@ export function assignTupleTypeArgs(
 
     let isAssignable = false;
     const constraintsFromAssignableCombinations: ConstraintTracker[] = [];
+    const diags: DiagnosticAddendum[] = [];
 
     const srcTypeArgsCombinations: TupleTypeArg[][] = [];
     for (const srcTypeArgsCombination of argsCombinationsIterator(srcTypeArgs)) {
@@ -126,12 +127,13 @@ export function assignTupleTypeArgs(
         if (!isAssignable || destTypeArgsCombination.some((destArg) => hasTypeVar(destArg.type))) {
             for (const srcTypeArgsCombination of srcTypeArgsCombinations) {
                 const clonedConstraints = !constraints || constraints.isLocked() ? constraints : constraints.clone();
+                const newDiag = diag ? new DiagnosticAddendum() : undefined;
                 if (
                     assignTupleTypeArgsInternal(
                         evaluator,
                         destTypeArgsCombination,
                         srcTypeArgsCombination,
-                        diag,
+                        newDiag,
                         clonedConstraints,
                         flags,
                         recursionCount
@@ -141,6 +143,8 @@ export function assignTupleTypeArgs(
                     if (clonedConstraints && !clonedConstraints.isLocked()) {
                         constraintsFromAssignableCombinations.push(clonedConstraints);
                     }
+                } else if (newDiag) {
+                    diags.push(newDiag);
                 }
             }
         }
@@ -148,6 +152,10 @@ export function assignTupleTypeArgs(
 
     if (constraints && !constraints.isLocked() && constraintsFromAssignableCombinations.length > 0) {
         constraints.addCombinedConstraints(constraintsFromAssignableCombinations);
+    }
+
+    if (!isAssignable && diags.length > 0 && !!diag) {
+        diags.forEach((d) => diag.addAddendum(d));
     }
 
     return isAssignable;
