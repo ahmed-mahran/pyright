@@ -7850,6 +7850,47 @@ export function createTypeEvaluator(
                     return typeResult.type;
                 }
 
+                if (isOverloaded(concreteSubtype)) {
+                    const indexedOverloaded = useSpeculativeMode(node, () => {
+                        const newOverloads: CallableType[] = [];
+                        OverloadedType.getOverloads(concreteSubtype).forEach((overload) => {
+                            const overloadIndexTypeResult = getTypeOfIndexWithBaseType(
+                                node,
+                                { ...baseTypeResult, type: overload },
+                                usage,
+                                flags
+                            );
+                            if (
+                                CallableType.isCallableType(overloadIndexTypeResult.type) &&
+                                !overloadIndexTypeResult.typeErrors
+                            ) {
+                                newOverloads.push(overloadIndexTypeResult.type);
+                            }
+                        });
+                        let impl = OverloadedType.getImplementation(concreteSubtype);
+                        if (impl) {
+                            const implTypeResult = getTypeOfIndexWithBaseType(
+                                node,
+                                { ...baseTypeResult, type: impl },
+                                usage,
+                                flags
+                            );
+                            if (implTypeResult.typeErrors) {
+                                impl = undefined;
+                            } else {
+                                impl = implTypeResult.type;
+                            }
+                        }
+                        if (impl || newOverloads.length > 0) {
+                            return OverloadedType.create(newOverloads, impl);
+                        }
+                        return undefined;
+                    });
+                    if (indexedOverloaded) {
+                        return indexedOverloaded;
+                    }
+                }
+
                 if (isNever(concreteSubtype)) {
                     return NeverType.createNever();
                 }
