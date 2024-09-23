@@ -22,10 +22,13 @@ import {
     combineTypes,
     isAnyOrUnknown,
     isAnyUnknownOrObject,
+    isClass,
     isClassInstance,
     isInstantiableClass,
     isTypeVar,
     isTypeVarTuple,
+    isUnion,
+    isUnpacked,
     isUnpackedTypeVarTuple,
     SubscriptKind,
     TupleTypeArg,
@@ -57,13 +60,115 @@ export function assignTupleTypeArgs(
     flags: AssignTypeFlags,
     recursionCount: number
 ) {
+    function* argsCombinationsIterator(args: TupleTypeArg[], start: number = 0): Generator<TupleTypeArg[]> {
+        function* argSubtypesIterator(arg: TupleTypeArg): Generator<TupleTypeArg[]> {
+            // First dimension represents parallel alternative of the same arg. If arg is
+            // a union, all subtypes are considered as alternatives to generate combinations.
+            // Second dimension represents sequential expansions. If arg is unpacked tuple,
+            // arg is expanded by replacing the tuple by its unpacked tuple arguments.
+            const argsSubtypes: TupleTypeArg[][] = [];
+            const type = arg.type;
+            if (isUnion(type)) {
+                // Union subtypes are parallel options
+                const subtypes = type.priv.subtypes;
+                for (const subtype of subtypes) {
+                    argsSubtypes.push([{ type: subtype, isUnbounded: arg.isUnbounded, isOptional: arg.isOptional }]);
+                }
+            } else if (isClass(type) && isTupleClass(type) && isUnpacked(type) && !!type.priv.tupleTypeArgs) {
+                // Unpacked tuple args are all added as sequential expansion
+                argsSubtypes.push(type.priv.tupleTypeArgs);
+            } else {
+                yield [arg];
+                return;
+            }
+            for (const subtype of argsSubtypes) {
+                // A subtype could be a nested union or unpacked tuple, hence we need
+                // to generate corresponding combinations.
+                for (const subtypeCombination of argsCombinationsIterator(subtype)) {
+                    yield subtypeCombination;
+                }
+            }
+        }
+        if (start >= args.length || start < 0) {
+            yield [];
+        } else if (start === args.length - 1) {
+            for (const i of argSubtypesIterator(args[start])) {
+                yield i;
+            }
+        } else {
+            const headCombinations: TupleTypeArg[][] = [];
+            for (const head of argSubtypesIterator(args[start])) {
+                headCombinations.push(head);
+            }
+
+            for (const tail of argsCombinationsIterator(args, start + 1)) {
+                for (const head of headCombinations) {
+                    yield [...head, ...tail];
+                }
+            }
+        }
+    }
+
+    const destTypeArgs = [...(destType.priv.tupleTypeArgs ?? [])];
+    const srcTypeArgs = [...(srcType.priv.tupleTypeArgs ?? [])];
+
+    let isAssignable = false;
+    const constraintsFromAssignableCombinations: ConstraintTracker[] = [];
+
+    const srcTypeArgsCombinations: TupleTypeArg[][] = [];
+    for (const srcTypeArgsCombination of argsCombinationsIterator(srcTypeArgs)) {
+        srcTypeArgsCombinations.push(srcTypeArgsCombination);
+    }
+
+    for (const destTypeArgsCombination of argsCombinationsIterator(destTypeArgs)) {
+        // Don't evaluate all combinations; just find the first assignable combination
+        // and evaluate those with type vars as well to get all possible bounds of the type vars
+        if (!isAssignable || destTypeArgsCombination.some((destArg) => hasTypeVar(destArg.type))) {
+            for (const srcTypeArgsCombination of srcTypeArgsCombinations) {
+                const clonedConstraints = !constraints || constraints.isLocked() ? constraints : constraints.clone();
+                if (
+                    assignTupleTypeArgsInternal(
+                        evaluator,
+                        destTypeArgsCombination,
+                        srcTypeArgsCombination,
+                        diag,
+                        clonedConstraints,
+                        flags,
+                        recursionCount
+                    )
+                ) {
+                    isAssignable = true;
+                    if (clonedConstraints && !clonedConstraints.isLocked()) {
+                        constraintsFromAssignableCombinations.push(clonedConstraints);
+                    }
+                }
+            }
+        }
+    }
+
+    if (constraints && !constraints.isLocked() && constraintsFromAssignableCombinations.length > 0) {
+        constraints.addCombinedConstraints(constraintsFromAssignableCombinations);
+    }
+
+    return isAssignable;
+}
+
+export function assignTupleTypeArgsInternal(
+    evaluator: TypeEvaluator,
+    destTupleTypeArgs: TupleTypeArg[],
+    srcTupleTypeArgs: TupleTypeArg[],
+    diag: DiagnosticAddendum | undefined,
+    constraints: ConstraintTracker | undefined,
+    flags: AssignTypeFlags,
+    recursionCount: number
+) {
     // A base case is when all repeated/intederminate args match zero
     function getBaseCase(typeArgs: TupleTypeArg[]) {
         return typeArgs.filter((arg) => !isIndeterminate(arg));
     }
 
-    const destTypeArgs = combineSubscriptedTypeVars([...(destType.priv.tupleTypeArgs ?? [])]);
-    const srcTypeArgs = combineSubscriptedTypeVars([...(srcType.priv.tupleTypeArgs ?? [])]);
+    const destTypeArgs = combineSubscriptedTypeVars(destTupleTypeArgs);
+    const srcTypeArgs = combineSubscriptedTypeVars(srcTupleTypeArgs);
     const destTypeArgsBaseCase = getBaseCase(destTypeArgs);
     const srcTypeArgsBaseCase = getBaseCase(srcTypeArgs);
 
