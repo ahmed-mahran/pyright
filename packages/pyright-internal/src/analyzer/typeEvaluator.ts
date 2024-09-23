@@ -2974,6 +2974,7 @@ export function createTypeEvaluator(
                                 classOrObjectBase,
                                 declaredType,
                                 /* memberClass */ undefined,
+                                /* skipFirstParamAssignmentCheck */ undefined,
                                 /* treatConstructorAsClassMethod */ undefined,
                                 selfType
                             );
@@ -6769,6 +6770,7 @@ export function createTypeEvaluator(
             classType,
             concreteType,
             memberInfo && isInstantiableClass(memberInfo.classType) ? memberInfo.classType : undefined,
+            /* skipFirstParamAssignmentCheck */ undefined,
             (flags & MemberAccessFlags.TreatConstructorAsClassMethod) !== 0,
             selfType && isClass(selfType) ? ClassType.cloneIncludeSubclasses(selfType) : selfType,
             diag,
@@ -27834,6 +27836,7 @@ export function createTypeEvaluator(
         baseType: ClassType | undefined,
         memberType: FunctionType | OverloadedType,
         memberClass?: ClassType,
+        skipFirstParamAssignmentCheck = false,
         treatConstructorAsClassMethod = false,
         selfType?: ClassType | TypeVarType,
         diag?: DiagnosticAddendum,
@@ -27869,7 +27872,8 @@ export function createTypeEvaluator(
                     diag,
                     recursionCount,
                     selfType ?? baseObj,
-                    stripFirstParam
+                    stripFirstParam,
+                    skipFirstParamAssignmentCheck
                 );
             }
 
@@ -27886,7 +27890,8 @@ export function createTypeEvaluator(
                     diag,
                     recursionCount,
                     clsType ?? baseClass,
-                    /* stripFirstParam */ true
+                    /* stripFirstParam */ true,
+                    skipFirstParamAssignmentCheck
                 );
             }
 
@@ -27899,7 +27904,8 @@ export function createTypeEvaluator(
                     diag,
                     recursionCount,
                     /* firstParamType */ undefined,
-                    /* stripFirstParam */ false
+                    /* stripFirstParam */ false,
+                    skipFirstParamAssignmentCheck
                 );
             }
 
@@ -27917,7 +27923,8 @@ export function createTypeEvaluator(
         diag: DiagnosticAddendum | undefined,
         recursionCount: number,
         firstParamType: ClassType | TypeVarType | undefined,
-        stripFirstParam = true
+        stripFirstParam = true,
+        skipFirstParamAssignmentCheck = false
     ): FunctionType | undefined {
         const constraints = new ConstraintTracker(evaluatorInterface);
 
@@ -27943,7 +27950,7 @@ export function createTypeEvaluator(
                             : firstParamType
                     );
                 }
-            } else if (!isTypeSame(memberTypeFirstParamType, firstParamType)) {
+            } else if (!(skipFirstParamAssignmentCheck || isTypeSame(memberTypeFirstParamType, firstParamType))) {
                 const subDiag = diag?.createAddendum();
 
                 if (
@@ -27980,7 +27987,13 @@ export function createTypeEvaluator(
         // evaluating (and caching) the inferred return type if there is no defined return type.
         getEffectiveReturnType(memberType);
 
-        const specializedFunction = solveAndApplyConstraints(memberType, constraints);
+        let specializedFunction: Type;
+        if (skipFirstParamAssignmentCheck && !!firstParamType && isClass(firstParamType)) {
+            const solution = buildSolutionFromSpecializedClass(evaluatorInterface, firstParamType);
+            specializedFunction = applySolvedTypeVars(memberType, solution);
+        } else {
+            specializedFunction = solveAndApplyConstraints(memberType, constraints);
+        }
         if (isFunction(specializedFunction)) {
             return FunctionType.clone(specializedFunction, stripFirstParam, baseType);
         }
