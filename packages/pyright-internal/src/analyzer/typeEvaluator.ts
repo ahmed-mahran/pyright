@@ -7632,6 +7632,7 @@ export function createTypeEvaluator(
             return { type };
         }
 
+        let typeErrors = baseTypeResult.typeErrors;
         let isIncomplete = baseTypeResult.isIncomplete;
         let isRequired = false;
         let isNotRequired = false;
@@ -7696,7 +7697,17 @@ export function createTypeEvaluator(
                         }
 
                         if (itemMethodType) {
-                            return getTypeOfIndexedObjectOrClass(node, concreteSubtype, selfType, usage, flags).type;
+                            const typeResult = getTypeOfIndexedObjectOrClass(
+                                node,
+                                concreteSubtype,
+                                selfType,
+                                usage,
+                                flags
+                            );
+                            if (typeResult.typeErrors) {
+                                typeErrors = true;
+                            }
+                            return typeResult.type;
                         }
                     }
 
@@ -7800,6 +7811,9 @@ export function createTypeEvaluator(
                     }
 
                     const result = createSpecializedClassType(concreteSubtype, typeArgs, flags, node);
+                    if (result.typeErrors) {
+                        typeErrors = true;
+                    }
                     if (result.isRequired) {
                         isRequired = true;
                     } else if (result.isNotRequired) {
@@ -7827,6 +7841,9 @@ export function createTypeEvaluator(
 
                 if (isClassInstance(concreteSubtype)) {
                     const typeResult = getTypeOfIndexedObjectOrClass(node, concreteSubtype, selfType, usage, flags);
+                    if (typeResult.typeErrors) {
+                        typeErrors = true;
+                    }
                     if (typeResult.isIncomplete) {
                         isIncomplete = true;
                     }
@@ -7863,7 +7880,7 @@ export function createTypeEvaluator(
             });
         }
 
-        return { type, isIncomplete, isReadOnly, isRequired, isNotRequired };
+        return { type, typeErrors, isIncomplete, isReadOnly, isRequired, isNotRequired };
     }
 
     // Determines the effective variance of the type parameters for a generic
@@ -8166,6 +8183,7 @@ export function createTypeEvaluator(
         return {
             type: callResult.returnType ?? UnknownType.create(),
             isIncomplete: !!callResult.isTypeIncomplete,
+            typeErrors: callResult.argumentErrors,
         };
     }
 
