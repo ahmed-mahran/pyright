@@ -29,7 +29,6 @@ import {
     FunctionTypeFlags,
     isAny,
     isAnyOrUnknown,
-    isCallable,
     isClass,
     isClassInstance,
     isFunction,
@@ -3507,7 +3506,7 @@ export class TypeVarTransformer {
                     ? this.transformTypeVarsInFunctionType(entry, recursionCount)
                     : this.transformTypeVarsInClassType(entry, recursionCount);
 
-                if (isCallable(replacementType)) {
+                if (isFunction(replacementType) || isClass(replacementType)) {
                     newOverloads.push(replacementType);
                 } else {
                     appendArray(newOverloads, OverloadedType.getOverloads(replacementType));

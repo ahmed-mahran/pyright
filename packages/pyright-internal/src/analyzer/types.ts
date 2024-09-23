@@ -2367,9 +2367,13 @@ export namespace FunctionType {
 export type CallableType = FunctionType | ClassType;
 
 export namespace CallableType {
+    export function isCallableType(type: Type): type is CallableType {
+        return isFunction(type) || isClass(type);
+    }
+
     export function getUndecoratedType(type: CallableType): Type {
         return type.priv.decoratedType
-            ? isCallable(type.priv.decoratedType)
+            ? isCallableType(type.priv.decoratedType)
                 ? getUndecoratedType(type.priv.decoratedType)
                 : type.priv.decoratedType
             : type;
@@ -3344,10 +3348,6 @@ export function isUnpacked(type: Type): boolean {
 
 export function isFunction(type: Type): type is FunctionType {
     return type.category === TypeCategory.Function;
-}
-
-export function isCallable(type: Type): type is CallableType {
-    return isFunction(type) || (isClass(type) && ClassType.isCallable(type));
 }
 
 export function isOverloaded(type: Type): type is OverloadedType {

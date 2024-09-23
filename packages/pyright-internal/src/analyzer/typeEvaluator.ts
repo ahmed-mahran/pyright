@@ -233,7 +233,6 @@ import {
     InheritanceChain,
     isAny,
     isAnyOrUnknown,
-    isCallable,
     isClass,
     isClassInstance,
     isFunction,
@@ -2478,6 +2477,50 @@ export function createTypeEvaluator(
     }
 
     function getFunctionTypeOfCallable(callableType: CallableType): FunctionType | undefined {
+        function createFunctionFromSubscriptable(classType: ClassType): FunctionType | OverloadedType | undefined {
+            const getitemCallInfo = lookUpClassMember(
+                evaluatorInterface,
+                classType,
+                '__getitem__',
+                MemberAccessFlags.Default
+            );
+
+            if (!getitemCallInfo) {
+                return undefined;
+            }
+
+            const getitemCallType = getTypeOfMember(getitemCallInfo);
+            if (!isFunction(getitemCallType)) {
+                return undefined;
+            }
+
+            const callable = FunctionType.getEffectiveReturnType(getitemCallType);
+
+            if (!callable || !(isFunction(callable) || isOverloaded(callable))) {
+                return undefined;
+            }
+
+            // Extract only type params from '__getitem__' method removing
+            // first 'self' param.
+            const typeParams = getitemCallType.shared.parameters.slice(1);
+
+            const solution = buildSolutionFromSpecializedClass(evaluatorInterface, classType);
+
+            return mapSignatures(callable, (signature) => {
+                const newFunction = FunctionType.createSynthesizedInstance('');
+                newFunction.shared.declaredReturnType = signature.shared.declaredReturnType;
+                newFunction.shared.deprecatedMessage = signature.shared.deprecatedMessage;
+                newFunction.shared.docString = signature.shared.docString;
+                newFunction.shared.flags = signature.shared.flags;
+                newFunction.shared.methodClass = signature.shared.methodClass;
+                newFunction.shared.parameters = [...typeParams, ...signature.shared.parameters];
+                newFunction.shared.typeParams = [...getitemCallType.shared.typeParams, ...signature.shared.typeParams];
+                newFunction.shared.typeVarScopeId = signature.shared.typeVarScopeId;
+                const specializedNewFunction = applySolvedTypeVars(newFunction, solution);
+                return isFunction(specializedNewFunction) ? specializedNewFunction : undefined;
+            });
+        }
+
         function getFunctionType(type: Type): FunctionType | undefined {
             if (isFunction(type)) {
                 return type;
@@ -2491,16 +2534,21 @@ export function createTypeEvaluator(
                     return getFunctionType(overloads[0]);
                 }
             } else if (isClass(type)) {
-                if (TypeBase.isInstantiable(type)) {
-                    const constructorType = createFunctionFromConstructor(evaluatorInterface, type);
-
-                    if (constructorType) {
-                        return getFunctionType(constructorType);
+                if (type.shared.fullName === 'mypyright_extensions.subscriptable') {
+                    const methodType = createFunctionFromSubscriptable(type);
+                    if (methodType) {
+                        return getFunctionType(methodType);
                     }
                 } else if (ClassType.isCallable(type)) {
                     const methodType = getBoundMagicMethod(type, '__call__', type);
                     if (methodType) {
                         return getFunctionType(methodType);
+                    }
+                } else if (TypeBase.isInstantiable(type)) {
+                    const constructorType = createFunctionFromConstructor(evaluatorInterface, type);
+
+                    if (constructorType) {
+                        return getFunctionType(constructorType);
                     }
                 }
             }
@@ -17881,8 +17929,12 @@ export function createTypeEvaluator(
             }
 
             // Determine if the class or any of its parents has "__call__" method
-            // hence it should be flagged Callable
-            if (ClassType.hasField(classType, '__call__')) {
+            // hence it should be flagged Callable. Also subscriptable decorator
+            // is effectively callable.
+            if (
+                ClassType.hasField(classType, '__call__') ||
+                classType.shared.fullName === 'mypyright_extensions.subscriptable'
+            ) {
                 classType.shared.flags |= ClassTypeFlags.Callable;
             }
 
@@ -25045,8 +25097,8 @@ export function createTypeEvaluator(
                 }
 
                 // Find all of the overloaded functions that match the parameters.
-                const overloads = getOverloads(concreteSrcType);
-                const filteredOverloads: FunctionType[] = [];
+                const overloads = OverloadedType.getOverloads(concreteSrcType);
+                const filteredOverloads: CallableType[] = [];
                 const typeVarSignatures: ConstraintSet[] = [];
 
                 overloads.forEach((overload) => {
@@ -25076,7 +25128,7 @@ export function createTypeEvaluator(
                 return true;
             }
 
-            if (isCallable(concreteSrcType)) {
+            if (isFunction(concreteSrcType) || (isClass(concreteSrcType) && ClassType.isCallable(concreteSrcType))) {
                 const concreteSrcTypeFunction = getFunctionTypeOfCallable(concreteSrcType);
                 if (
                     concreteSrcTypeFunction &&
