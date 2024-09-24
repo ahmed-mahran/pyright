@@ -20,3 +20,20 @@ class subscriptable[Owner, *T, **P, R]:
 
   def __getitem__(self, tp: Map[Type, *T]) -> Callable[P, R]:
     ...
+
+class subscriptablefunction[*T, **P, R]:
+  def __init__(self, fn: Callable[Concatenate[Map[Type, *T], P], R]) -> None:
+    ...
+
+  def __getitem__(self, tp: Map[Type, *T]) -> Callable[P, R]:
+    ...
+
+class subscriptablemethod[Owner, *T, **P, R]:
+  def __init__(self, fn: Callable[Concatenate[Owner, Map[Type, *T], P], R]) -> None:
+    ...
+
+  def __get__(self, instance: Owner, owner: Type[Owner]) -> Self:
+    ...
+
+  def __getitem__(self, tp: Map[Type, *T]) -> Callable[P, R]:
+    ...

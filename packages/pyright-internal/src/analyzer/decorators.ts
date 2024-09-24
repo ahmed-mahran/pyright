@@ -18,6 +18,7 @@ import {
 } from './dataClasses';
 import { DeclarationType, FunctionDeclaration } from './declaration';
 import { convertDocStringToPlainText } from './docStringConversion';
+import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
 import {
     clonePropertyWithDeleter,
     clonePropertyWithSetter,
@@ -412,10 +413,7 @@ function getTypeOfDecorator(evaluator: TypeEvaluator, node: DecoratorNode, funct
     ];
 
     let isArgAssignmentCovariant: boolean | undefined;
-    if (
-        isClass(decoratorTypeResult.type) &&
-        decoratorTypeResult.type.shared.fullName === 'mypyright_extensions.subscriptable'
-    ) {
+    if (isClass(decoratorTypeResult.type) && MyPyrightExtensions.isSubscriptable(decoratorTypeResult.type)) {
         isArgAssignmentCovariant = true;
     }
 

@@ -718,4 +718,12 @@ export namespace MyPyrightExtensions {
         // return TypeBase.cloneType(UnknownType.create());
         return UnknownType.create();
     }
+
+    export function isSubscriptable(classType: ClassType): boolean {
+        return (
+            classType.shared.fullName === 'mypyright_extensions.subscriptable' ||
+            classType.shared.fullName === 'mypyright_extensions.subscriptablefunction' ||
+            classType.shared.fullName === 'mypyright_extensions.subscriptablemethod'
+        );
+    }
 }

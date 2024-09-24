@@ -2539,7 +2539,7 @@ export function createTypeEvaluator(
                     return getFunctionType(overloads[0]);
                 }
             } else if (isClass(type)) {
-                if (type.shared.fullName === 'mypyright_extensions.subscriptable') {
+                if (MyPyrightExtensions.isSubscriptable(type)) {
                     const methodType = createFunctionFromSubscriptable(type);
                     if (methodType) {
                         return getFunctionType(methodType);
@@ -18012,10 +18012,7 @@ export function createTypeEvaluator(
             // Determine if the class or any of its parents has "__call__" method
             // hence it should be flagged Callable. Also subscriptable decorator
             // is effectively callable.
-            if (
-                ClassType.hasField(classType, '__call__') ||
-                classType.shared.fullName === 'mypyright_extensions.subscriptable'
-            ) {
+            if (ClassType.hasField(classType, '__call__') || MyPyrightExtensions.isSubscriptable(classType)) {
                 classType.shared.flags |= ClassTypeFlags.Callable;
             }
 
