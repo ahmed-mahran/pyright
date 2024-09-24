@@ -2511,7 +2511,7 @@ export function createTypeEvaluator(
             if (isFunction(originalType) || isClass(originalType)) {
                 functionName = originalType.shared.name;
             }
-            return mapSignatures(callable, (signature) => {
+            return mapSignatures(callable, isFunction, isFunction, (signature) => {
                 const newFunction = FunctionType.createSynthesizedInstance(functionName);
                 newFunction.shared.declaredReturnType = signature.shared.declaredReturnType;
                 newFunction.shared.deprecatedMessage = signature.shared.deprecatedMessage;
@@ -27921,7 +27921,10 @@ export function createTypeEvaluator(
         diag?: DiagnosticAddendum,
         recursionCount = 0
     ): FunctionType | OverloadedType | undefined {
-        return mapSignatures(memberType, (functionType) => {
+        return mapSignatures(memberType, isFunction, CallableType.isCallableType, (functionType) => {
+            if (!isFunction(functionType)) {
+                return functionType;
+            }
             // If the caller specified no base type, always strip the
             // first parameter. This is used in cases like constructors.
             if (!baseType) {

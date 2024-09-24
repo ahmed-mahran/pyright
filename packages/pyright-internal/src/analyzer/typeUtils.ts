@@ -431,23 +431,27 @@ export function mapSubtypes(
 
 // Iterates over each signature in a function or overload, allowing the
 // caller to replace one or more signatures with new ones.
-export function mapSignatures(
-    type: CallableType | OverloadedType,
-    callback: (type: FunctionType) => FunctionType | undefined
-): OverloadedType | FunctionType | undefined {
-    if (isClass(type)) {
+export function mapSignatures<Mapped extends CallableType, In extends Mapped>(
+    type: In | OverloadedType,
+    evidenceIn: (type: CallableType) => type is In,
+    evidenceMapped: (type: CallableType) => type is Mapped,
+    callback: (type: Mapped) => Mapped | undefined
+): OverloadedType | In | undefined {
+    if (!isOverloaded(type)) {
+        if (evidenceMapped(type)) {
+            const result = callback(type);
+            if (!result || evidenceIn(result)) {
+                return result;
+            }
+        }
         return undefined;
     }
 
-    if (isFunction(type)) {
-        return callback(type);
-    }
-
-    const newSignatures: FunctionType[] = [];
+    const newSignatures: Mapped[] = [];
     let changeMade = false;
 
     OverloadedType.getOverloads(type).forEach((overload, index) => {
-        if (!isFunction(overload)) {
+        if (!evidenceMapped(overload)) {
             return;
         }
         const newOverload = callback(overload);
@@ -468,7 +472,7 @@ export function mapSignatures(
     const implementation = OverloadedType.getImplementation(type);
     let newImplementation: Type | undefined = implementation;
 
-    if (implementation && isFunction(implementation)) {
+    if (implementation && CallableType.isCallableType(implementation) && evidenceMapped(implementation)) {
         newImplementation = callback(implementation);
 
         if (newImplementation) {
@@ -480,7 +484,7 @@ export function mapSignatures(
         return type;
     }
 
-    if (newSignatures.length === 1) {
+    if (newSignatures.length === 1 && evidenceIn(newSignatures[0])) {
         return newSignatures[0];
     }
 
