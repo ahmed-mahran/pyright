@@ -2378,6 +2378,11 @@ export namespace CallableType {
                 : type.priv.decoratedType
             : type;
     }
+
+    export function getUndecoratedCallableTypeOrThis(type: CallableType): CallableType {
+        const result = getUndecoratedType(type);
+        return isCallableType(result) ? result : type;
+    }
 }
 
 export interface OverloadedDetailsPriv {

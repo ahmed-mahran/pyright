@@ -24,6 +24,7 @@ import {
 import { TypeEvaluator } from '../analyzer/typeEvaluatorTypes';
 import { MemberAccessFlags, getUnknownTypeForCallable, lookUpClassMember } from '../analyzer/typeUtils';
 import {
+    CallableType,
     ClassType,
     FunctionType,
     OverloadedType,
@@ -78,7 +79,7 @@ export function getOverloadedTooltip(
     const overloads = OverloadedType.getOverloads(type).map((o) =>
         getFunctionTooltip(
             /* label */ '',
-            o.shared.name,
+            CallableType.getUndecoratedCallableTypeOrThis(o).shared.name,
             evaluator.getFunctionTypeOfCallable(o) ?? getUnknownTypeForCallable(),
             evaluator,
             /* isProperty */ false,
@@ -194,13 +195,14 @@ export function getOverloadedDocStringsFromType(
         return [];
     }
 
-    const decl = overloads[0].shared.declaration;
+    const firstOriginalOverload = CallableType.getUndecoratedCallableTypeOrThis(overloads[0]);
+    const decl = firstOriginalOverload.shared.declaration;
     const enclosingClass = decl ? ParseTreeUtils.getEnclosingClass(decl.node) : undefined;
     const classResults = enclosingClass ? evaluator.getTypeOfClass(enclosingClass) : undefined;
 
     return getOverloadedDocStringsInherited(
         type,
-        overloads.map((o) => o.shared.declaration).filter(isDefined),
+        overloads.map((o) => CallableType.getUndecoratedCallableTypeOrThis(o).shared.declaration).filter(isDefined),
         sourceMapper,
         evaluator,
 

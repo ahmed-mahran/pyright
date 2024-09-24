@@ -23,6 +23,7 @@ import {
 import * as ParseTreeUtils from '../analyzer/parseTreeUtils';
 import { isStubFile, SourceMapper } from '../analyzer/sourceMapper';
 import {
+    CallableType,
     ClassType,
     FunctionType,
     isFunction,
@@ -141,7 +142,7 @@ export function getOverloadedDocStringsInherited(
     // Search mro
     const overloads = OverloadedType.getOverloads(type);
     if (classType && overloads.length > 0) {
-        const funcName = overloads[0].shared.name;
+        const funcName = CallableType.getUndecoratedCallableTypeOrThis(overloads[0]).shared.name;
         const memberIterator = getClassMemberIterator(
             evaluator,
             classType,
@@ -305,7 +306,7 @@ function _getOverloadedDocStrings(type: Type, resolvedDecl: Declaration | undefi
     }
 
     const docStrings: string[] = [];
-    const overloads = OverloadedType.getOverloads(type);
+    const overloads = OverloadedType.getOverloads(type).map(CallableType.getUndecoratedCallableTypeOrThis);
     const impl = OverloadedType.getImplementation(type);
 
     if (overloads.some((o) => o.shared.docString)) {
@@ -316,8 +317,11 @@ function _getOverloadedDocStrings(type: Type, resolvedDecl: Declaration | undefi
         });
     }
 
-    if (impl && isFunction(impl) && impl.shared.docString) {
-        docStrings.push(impl.shared.docString);
+    if (impl && CallableType.isCallableType(impl)) {
+        const originalImpl = CallableType.getUndecoratedCallableTypeOrThis(impl);
+        if (originalImpl.shared.docString) {
+            docStrings.push(originalImpl.shared.docString);
+        }
     }
 
     if (
