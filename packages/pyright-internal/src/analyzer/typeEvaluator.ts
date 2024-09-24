@@ -7851,15 +7851,13 @@ export function createTypeEvaluator(
                 }
 
                 if (isOverloaded(concreteSubtype)) {
+                    const getTypeOfIndexWithBaseTypeRecursive = function (type: Type) {
+                        return getTypeOfIndexWithBaseType(node, { ...baseTypeResult, type }, usage, flags);
+                    };
                     const indexedOverloaded = useSpeculativeMode(node, () => {
                         const newOverloads: CallableType[] = [];
                         OverloadedType.getOverloads(concreteSubtype).forEach((overload) => {
-                            const overloadIndexTypeResult = getTypeOfIndexWithBaseType(
-                                node,
-                                { ...baseTypeResult, type: overload },
-                                usage,
-                                flags
-                            );
+                            const overloadIndexTypeResult = getTypeOfIndexWithBaseTypeRecursive(overload);
                             if (
                                 CallableType.isCallableType(overloadIndexTypeResult.type) &&
                                 !overloadIndexTypeResult.typeErrors
@@ -7869,12 +7867,7 @@ export function createTypeEvaluator(
                         });
                         let impl = OverloadedType.getImplementation(concreteSubtype);
                         if (impl) {
-                            const implTypeResult = getTypeOfIndexWithBaseType(
-                                node,
-                                { ...baseTypeResult, type: impl },
-                                usage,
-                                flags
-                            );
+                            const implTypeResult = getTypeOfIndexWithBaseTypeRecursive(impl);
                             if (implTypeResult.typeErrors) {
                                 impl = undefined;
                             } else {
@@ -7888,6 +7881,10 @@ export function createTypeEvaluator(
                     });
                     if (indexedOverloaded) {
                         return indexedOverloaded;
+                    } else {
+                        // Do another pass to report errors
+                        OverloadedType.getOverloads(concreteSubtype).forEach(getTypeOfIndexWithBaseTypeRecursive);
+                        return UnknownType.create();
                     }
                 }
 
