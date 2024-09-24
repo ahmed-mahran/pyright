@@ -2506,8 +2506,13 @@ export function createTypeEvaluator(
 
             const solution = buildSolutionFromSpecializedClass(evaluatorInterface, classType);
 
+            let functionName = '';
+            const originalType = CallableType.getUndecoratedType(classType);
+            if (isFunction(originalType) || isClass(originalType)) {
+                functionName = originalType.shared.name;
+            }
             return mapSignatures(callable, (signature) => {
-                const newFunction = FunctionType.createSynthesizedInstance('');
+                const newFunction = FunctionType.createSynthesizedInstance(functionName);
                 newFunction.shared.declaredReturnType = signature.shared.declaredReturnType;
                 newFunction.shared.deprecatedMessage = signature.shared.deprecatedMessage;
                 newFunction.shared.docString = signature.shared.docString;
@@ -7855,6 +7860,14 @@ export function createTypeEvaluator(
                         return getTypeOfIndexWithBaseType(node, { ...baseTypeResult, type }, usage, flags);
                     };
                     const indexedOverloaded = useSpeculativeMode(node, () => {
+                        let impl = OverloadedType.getImplementation(concreteSubtype);
+                        let functionName = '';
+                        if (impl && CallableType.isCallableType(impl)) {
+                            const originalImpl = CallableType.getUndecoratedType(impl);
+                            if (CallableType.isCallableType(originalImpl)) {
+                                functionName = originalImpl.shared.name;
+                            }
+                        }
                         const newOverloads: CallableType[] = [];
                         OverloadedType.getOverloads(concreteSubtype).forEach((overload) => {
                             const overloadIndexTypeResult = getTypeOfIndexWithBaseTypeRecursive(overload);
@@ -7862,16 +7875,22 @@ export function createTypeEvaluator(
                                 CallableType.isCallableType(overloadIndexTypeResult.type) &&
                                 !overloadIndexTypeResult.typeErrors
                             ) {
+                                if (overloadIndexTypeResult.type.shared.name === '') {
+                                    overloadIndexTypeResult.type.shared.name = functionName;
+                                }
                                 newOverloads.push(overloadIndexTypeResult.type);
                             }
                         });
-                        let impl = OverloadedType.getImplementation(concreteSubtype);
+
                         if (impl) {
                             const implTypeResult = getTypeOfIndexWithBaseTypeRecursive(impl);
                             if (implTypeResult.typeErrors) {
                                 impl = undefined;
                             } else {
                                 impl = implTypeResult.type;
+                                if (CallableType.isCallableType(impl) && impl.shared.name === '') {
+                                    impl.shared.name = functionName;
+                                }
                             }
                         }
                         if (impl || newOverloads.length > 0) {
