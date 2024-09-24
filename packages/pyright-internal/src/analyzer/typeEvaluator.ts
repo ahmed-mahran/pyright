@@ -7856,9 +7856,21 @@ export function createTypeEvaluator(
                 }
 
                 if (isOverloaded(concreteSubtype)) {
-                    const getTypeOfIndexWithBaseTypeRecursive = function (type: Type) {
-                        return getTypeOfIndexWithBaseType(node, { ...baseTypeResult, type }, usage, flags);
-                    };
+                    function getTypeOfIndexForOverload(type: Type): Type | undefined {
+                        if (isClassInstance(type)) {
+                            const typeResult = getTypeOfIndexedObjectOrClass(
+                                node,
+                                type,
+                                /* selfType */ undefined,
+                                usage,
+                                flags
+                            );
+                            if (!typeResult.typeErrors) {
+                                return typeResult.type;
+                            }
+                        }
+                        return undefined;
+                    }
                     const indexedOverloaded = useSpeculativeMode(node, () => {
                         let impl = OverloadedType.getImplementation(concreteSubtype);
                         let functionName = '';
@@ -7870,29 +7882,21 @@ export function createTypeEvaluator(
                         }
                         const newOverloads: CallableType[] = [];
                         OverloadedType.getOverloads(concreteSubtype).forEach((overload) => {
-                            const overloadIndexTypeResult = getTypeOfIndexWithBaseTypeRecursive(overload);
-                            if (
-                                CallableType.isCallableType(overloadIndexTypeResult.type) &&
-                                !overloadIndexTypeResult.typeErrors
-                            ) {
-                                if (overloadIndexTypeResult.type.shared.name === '') {
-                                    overloadIndexTypeResult.type.shared.name = functionName;
+                            const overloadIndexTypeResult = getTypeOfIndexForOverload(overload);
+                            if (!!overloadIndexTypeResult && CallableType.isCallableType(overloadIndexTypeResult)) {
+                                if (overloadIndexTypeResult.shared.name === '') {
+                                    overloadIndexTypeResult.shared.name = functionName;
                                 }
-                                newOverloads.push(overloadIndexTypeResult.type);
+                                newOverloads.push(overloadIndexTypeResult);
                             }
                         });
 
                         if (impl) {
-                            const implTypeResult = getTypeOfIndexWithBaseTypeRecursive(impl);
-                            if (implTypeResult.typeErrors) {
-                                impl = undefined;
-                            } else {
-                                impl = implTypeResult.type;
-                                if (CallableType.isCallableType(impl) && impl.shared.name === '') {
+                            impl = getTypeOfIndexForOverload(impl);
+                            if (!!impl && CallableType.isCallableType(impl) && impl.shared.name === '') {
                                     impl.shared.name = functionName;
                                 }
                             }
-                        }
                         if (impl || newOverloads.length > 0) {
                             return OverloadedType.create(newOverloads, impl);
                         }
@@ -7902,7 +7906,7 @@ export function createTypeEvaluator(
                         return indexedOverloaded;
                     } else {
                         // Do another pass to report errors
-                        OverloadedType.getOverloads(concreteSubtype).forEach(getTypeOfIndexWithBaseTypeRecursive);
+                        OverloadedType.getOverloads(concreteSubtype).forEach(getTypeOfIndexForOverload);
                         return UnknownType.create();
                     }
                 }
