@@ -104,12 +104,13 @@ export function printType(
 export function printFunctionParts(
     type: FunctionType,
     printTypeFlags: PrintTypeFlags,
-    returnTypeCallback: FunctionReturnTypeCallback
-): [string[], string] {
+    returnTypeCallback: FunctionReturnTypeCallback,
+    isSubscriptable: boolean = false
+): [string[], string[], string] {
     const uniqueNameMap = new UniqueNameMap(printTypeFlags, returnTypeCallback);
     uniqueNameMap.build(type);
 
-    return printFunctionPartsInternal(type, printTypeFlags, returnTypeCallback, uniqueNameMap, [], 0);
+    return printFunctionPartsInternal(type, printTypeFlags, returnTypeCallback, isSubscriptable, uniqueNameMap, [], 0);
 }
 
 export function printObjectTypeForClass(
@@ -458,6 +459,7 @@ function printTypeInternal(
                         FunctionType.cloneAsInstance(type),
                         printTypeFlags,
                         returnTypeCallback,
+                        /* isSubscriptable */ undefined,
                         uniqueNameMap,
                         recursionTypes,
                         recursionCount
@@ -469,6 +471,7 @@ function printTypeInternal(
                     type,
                     originalPrintTypeFlags,
                     returnTypeCallback,
+                    /* isSubscriptable */ undefined,
                     uniqueNameMap,
                     recursionTypes,
                     recursionCount
@@ -799,6 +802,7 @@ function printFunctionType(
     type: FunctionType,
     printTypeFlags: PrintTypeFlags,
     returnTypeCallback: FunctionReturnTypeCallback,
+    isSubscriptable: boolean | undefined,
     uniqueNameMap: UniqueNameMap,
     recursionTypes: Type[],
     recursionCount: number
@@ -878,21 +882,23 @@ function printFunctionType(
             type,
             printTypeFlags,
             returnTypeCallback,
+            isSubscriptable,
             uniqueNameMap,
             recursionTypes,
             recursionCount
         );
-        const paramSignature = `(${parts[0].join(', ')})`;
+        const typeParamsString = parts[0].length > 0 ? `[${parts[0].join(', ')}]` : '';
+        const paramSignature = `${typeParamsString}(${parts[1].join(', ')})`;
 
         if (FunctionType.isParamSpecValue(type)) {
-            if (parts[0].length === 1 && parts[0][0] === '...') {
-                return parts[0][0];
+            if (parts[1].length === 1 && parts[1][0] === '...') {
+                return parts[1][0];
             }
 
             return paramSignature;
         }
 
-        const fullSignature = `${paramSignature} -> ${parts[1]}`;
+        const fullSignature = `${paramSignature} -> ${parts[2]}`;
         const parenthesizeCallable = (printTypeFlags & PrintTypeFlags.ParenthesizeCallable) !== 0;
         if (parenthesizeCallable) {
             return `(${fullSignature})`;
@@ -1074,12 +1080,25 @@ function printFunctionPartsInternal(
     type: FunctionType,
     printTypeFlags: PrintTypeFlags,
     returnTypeCallback: FunctionReturnTypeCallback,
+    isSubscriptable: boolean | undefined,
     uniqueNameMap: UniqueNameMap,
     recursionTypes: Type[],
     recursionCount: number
-): [string[], string] {
+): [string[], string[], string] {
+    const typeParamStrings: string[] = [];
     const paramTypeStrings: string[] = [];
     let sawDefinedName = false;
+
+    const print = function (type: Type) {
+        return printTypeInternal(
+            type,
+            printTypeFlags,
+            returnTypeCallback,
+            uniqueNameMap,
+            recursionTypes,
+            recursionCount
+        );
+    };
 
     // Remove the (*args: P.args, **kwargs: P.kwargs) from the end of the parameter list.
     const paramSpec = FunctionType.getParamSpecFromArgsKwargs(type);
@@ -1090,6 +1109,12 @@ function printFunctionPartsInternal(
     type.shared.parameters.forEach((param, index) => {
         const paramType = FunctionType.getParamType(type, index);
         const defaultType = FunctionType.getParamDefaultType(type, index);
+
+        // Handle subscriptable function type params.
+        if (isSubscriptable && index === 0 && param.category === ParamCategory.Simple) {
+            type.shared.typeParams.forEach((typeParam) => typeParamStrings.push(print(typeParam)));
+            return;
+        }
 
         // Handle specialized TypeVarTuples specially.
         if (
@@ -1104,15 +1129,7 @@ function printFunctionPartsInternal(
                 specializedParamType.priv.tupleTypeArgs
             ) {
                 specializedParamType.priv.tupleTypeArgs.forEach((paramType) => {
-                    const paramString = printTypeInternal(
-                        paramType.type,
-                        printTypeFlags,
-                        returnTypeCallback,
-                        uniqueNameMap,
-                        recursionTypes,
-                        recursionCount
-                    );
-                    paramTypeStrings.push(paramString);
+                    paramTypeStrings.push(print(paramType.type));
                 });
                 return;
             }
@@ -1125,15 +1142,7 @@ function printFunctionPartsInternal(
             paramType.category === TypeCategory.Class
         ) {
             paramType.shared.typedDictEntries!.knownItems.forEach((v, k) => {
-                const valueTypeString = printTypeInternal(
-                    v.valueType,
-                    printTypeFlags,
-                    returnTypeCallback,
-                    uniqueNameMap,
-                    recursionTypes,
-                    recursionCount
-                );
-                paramTypeStrings.push(`${k}: ${valueTypeString}`);
+                paramTypeStrings.push(`${k}: ${print(v.valueType)}`);
             });
             return;
         }
@@ -1165,17 +1174,7 @@ function printFunctionPartsInternal(
             // Avoid printing type types if parameter have unknown type.
             if (FunctionParam.isTypeDeclared(param) || FunctionParam.isTypeInferred(param)) {
                 const paramType = FunctionType.getParamType(type, index);
-                let paramTypeString =
-                    recursionTypes.length < maxTypeRecursionCount
-                        ? printTypeInternal(
-                              paramType,
-                              printTypeFlags,
-                              returnTypeCallback,
-                              uniqueNameMap,
-                              recursionTypes,
-                              recursionCount
-                          )
-                        : '';
+                let paramTypeString = recursionTypes.length < maxTypeRecursionCount ? print(paramType) : '';
 
                 if (emittedParamName) {
                     paramString += ': ';
@@ -1251,16 +1250,7 @@ function printFunctionPartsInternal(
             paramTypeStrings.push(`*args: ${paramSpec}.args`);
             paramTypeStrings.push(`**kwargs: ${paramSpec}.kwargs`);
         } else {
-            paramTypeStrings.push(
-                `**${printTypeInternal(
-                    paramSpec,
-                    printTypeFlags,
-                    returnTypeCallback,
-                    uniqueNameMap,
-                    recursionTypes,
-                    recursionCount
-                )}`
-            );
+            paramTypeStrings.push(`**${print(paramSpec)}`);
         }
     }
 
@@ -1277,7 +1267,7 @@ function printFunctionPartsInternal(
               )
             : '';
 
-    return [paramTypeStrings, returnTypeString];
+    return [typeParamStrings, paramTypeStrings, returnTypeString];
 }
 
 function _printUnpack(textToWrap: string, flags: PrintTypeFlags) {

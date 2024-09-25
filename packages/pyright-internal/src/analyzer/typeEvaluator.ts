@@ -28250,9 +28250,13 @@ export function createTypeEvaluator(
         return TypePrinter.printObjectTypeForClass(type, evaluatorOptions.printTypeFlags, getEffectiveReturnType);
     }
 
-    function printFunctionParts(type: FunctionType, extraFlags?: TypePrinter.PrintTypeFlags): [string[], string] {
+    function printFunctionParts(
+        type: FunctionType,
+        isSubscriptable: boolean,
+        extraFlags?: TypePrinter.PrintTypeFlags
+    ): [string[], string[], string] {
         const flags = extraFlags ? evaluatorOptions.printTypeFlags | extraFlags : evaluatorOptions.printTypeFlags;
-        return TypePrinter.printFunctionParts(type, flags, getEffectiveReturnType);
+        return TypePrinter.printFunctionParts(type, flags, getEffectiveReturnType, isSubscriptable);
     }
 
     // Prints two types and determines whether they need to be output in

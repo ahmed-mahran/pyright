@@ -226,7 +226,11 @@ export class SignatureHelpProvider {
 
     private _makeSignature(callNode: CallNode, signature: CallSignature): SignatureInfo {
         const functionType = signature.type;
-        const stringParts = this._evaluator.printFunctionParts(functionType, PrintTypeFlags.ExpandTypedDictArgs);
+        const stringParts = this._evaluator.printFunctionParts(
+            functionType,
+            /* isSubscriptable */ false,
+            PrintTypeFlags.ExpandTypedDictArgs
+        );
         const parameters: ParamInfo[] = [];
         const functionDocString =
             getFunctionDocStringFromType(functionType, this._sourceMapper, this._evaluator) ??
@@ -237,7 +241,7 @@ export class SignatureHelpProvider {
         let activeParameter: number | undefined;
         const params = functionType.shared.parameters;
 
-        stringParts[0].forEach((paramString: string, paramIndex) => {
+        stringParts[1].forEach((paramString: string, paramIndex) => {
             let paramName = '';
             if (paramIndex < params.length) {
                 paramName = params[paramIndex].name || '';
@@ -258,12 +262,12 @@ export class SignatureHelpProvider {
             }
 
             label += paramString;
-            if (paramIndex < stringParts[0].length - 1) {
+            if (paramIndex < stringParts[1].length - 1) {
                 label += ', ';
             }
         });
 
-        label += ') -> ' + stringParts[1];
+        label += ') -> ' + stringParts[2];
 
         if (signature.activeParam && activeParameter === undefined) {
             activeParameter = params.indexOf(signature.activeParam);

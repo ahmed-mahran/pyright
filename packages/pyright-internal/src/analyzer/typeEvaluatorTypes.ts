@@ -829,7 +829,11 @@ export interface TypeEvaluator {
 
     printType: (type: Type, options?: PrintTypeOptions) => string;
     printSrcDestTypes: (srcType: Type, destType: Type) => { sourceType: string; destType: string };
-    printFunctionParts: (type: FunctionType, extraFlags?: PrintTypeFlags) => [string[], string];
+    printFunctionParts: (
+        type: FunctionType,
+        isSubscriptable: boolean,
+        extraFlags?: PrintTypeFlags
+    ) => [string[], string[], string];
 
     getTypeCacheEntryCount: () => number;
     disposeEvaluator: () => void;

@@ -9,6 +9,7 @@
  */
 
 import { Declaration, DeclarationType, VariableDeclaration } from '../analyzer/declaration';
+import { MyPyrightExtensions } from '../analyzer/mypyrightExtensionsUtils';
 import * as ParseTreeUtils from '../analyzer/parseTreeUtils';
 import { SourceMapper } from '../analyzer/sourceMapper';
 import { Symbol } from '../analyzer/symbol';
@@ -33,6 +34,7 @@ import {
     TypeCategory,
     UnknownType,
     combineTypes,
+    isClass,
     isClassInstance,
     isFunction,
     isInstantiableClass,
@@ -59,7 +61,15 @@ export function getToolTipForType(
         signatureString = label.length > 0 ? `(${label})\n` : '';
         signatureString += `${getOverloadedTooltip(type, evaluator, functionSignatureDisplay)}`;
     } else if (isFunction(type)) {
-        signatureString = `${getFunctionTooltip(label, name, type, evaluator, isProperty, functionSignatureDisplay)}`;
+        signatureString = `${getFunctionTooltip(
+            label,
+            name,
+            type,
+            evaluator,
+            /* isSubscriptable */ false,
+            isProperty,
+            functionSignatureDisplay
+        )}`;
     } else {
         signatureString = label.length > 0 ? `(${label}) ` : '';
         signatureString += `${name}: ${evaluator.printType(type)}`;
@@ -82,6 +92,7 @@ export function getOverloadedTooltip(
             CallableType.getUndecoratedCallableTypeOrThis(o).shared.name,
             evaluator.getFunctionTypeOfCallable(o) ?? getUnknownTypeForCallable(),
             evaluator,
+            /* isSubscriptable */ isClass(o) && MyPyrightExtensions.isSubscriptable(o),
             /* isProperty */ false,
             functionSignatureDisplay
         )
@@ -110,14 +121,15 @@ export function getFunctionTooltip(
     functionName: string,
     type: FunctionType,
     evaluator: TypeEvaluator,
+    isSubscriptable: boolean,
     isProperty = false,
     functionSignatureDisplay: SignatureDisplayType
 ) {
     const labelFormatted = label.length === 0 ? '' : `(${label}) `;
     const indentStr =
         functionSignatureDisplay === SignatureDisplayType.formatted ? '\n' + ' '.repeat(functionParamIndentOffset) : '';
-    const funcParts = evaluator.printFunctionParts(type);
-    const paramSignature = `${formatSignature(funcParts, indentStr, functionSignatureDisplay)} -> ${funcParts[1]}`;
+    const funcParts = evaluator.printFunctionParts(type, isSubscriptable);
+    const paramSignature = `${formatSignature(funcParts, indentStr, functionSignatureDisplay)} -> ${funcParts[2]}`;
 
     if (TypeBase.isInstantiable(type)) {
         return `${labelFormatted}${functionName}: type[${paramSignature}]`;
@@ -157,7 +169,7 @@ export function getConstructorTooltip(
             functionSignatureDisplay === SignatureDisplayType.formatted
                 ? '\n' + ' '.repeat(functionParamIndentOffset)
                 : ' ';
-        const funcParts = evaluator.printFunctionParts(type);
+        const funcParts = evaluator.printFunctionParts(type, /* isSubscriptable */ false);
         const paramSignature = formatSignature(funcParts, indentStr, functionSignatureDisplay);
         signature += `${classText}${constructorName}${paramSignature}`;
     }
@@ -166,15 +178,21 @@ export function getConstructorTooltip(
 
 // Only formats signature if there is more than one parameter
 function formatSignature(
-    funcParts: [string[], string],
+    funcParts: [string[], string[], string],
     indentStr: string,
     functionSignatureDisplay: SignatureDisplayType
 ) {
+    const typeParamsString =
+        funcParts.length > 0 && funcParts[0].length > 0
+            ? functionSignatureDisplay === SignatureDisplayType.formatted
+                ? `[${indentStr}${funcParts[0].join(',' + indentStr)}]`
+                : `[${funcParts[0].join(', ')}]`
+            : '';
     return functionSignatureDisplay === SignatureDisplayType.formatted &&
         funcParts.length > 0 &&
-        funcParts[0].length > 1
-        ? `(${indentStr}${funcParts[0].join(',' + indentStr)}\n)`
-        : `(${funcParts[0].join(', ')})`;
+        funcParts[1].length > 1
+        ? `${typeParamsString}(${indentStr}${funcParts[1].join(',' + indentStr)}\n)`
+        : `${typeParamsString}(${funcParts[1].join(', ')})`;
 }
 
 export function getFunctionDocStringFromType(type: FunctionType, sourceMapper: SourceMapper, evaluator: TypeEvaluator) {
