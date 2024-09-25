@@ -2502,14 +2502,16 @@ export function createTypeEvaluator(
 
             // Extract only type params from '__getitem__' method removing
             // first 'self' param.
-            const typeParams = getitemCallType.shared.parameters.slice(1);
+            const typeParamsParam = getitemCallType.shared.parameters.slice(1);
 
             const solution = buildSolutionFromSpecializedClass(evaluatorInterface, classType);
 
             let functionName = '';
+            let typeParams: TypeVarType[] = [];
             const originalType = CallableType.getUndecoratedType(classType);
             if (isFunction(originalType) || isClass(originalType)) {
                 functionName = originalType.shared.name;
+                typeParams = originalType.shared.typeParams;
             }
             return mapSignatures(callable, isFunction, isFunction, (signature) => {
                 const newFunction = FunctionType.createSynthesizedInstance(functionName);
@@ -2518,8 +2520,8 @@ export function createTypeEvaluator(
                 newFunction.shared.docString = signature.shared.docString;
                 newFunction.shared.flags = signature.shared.flags;
                 newFunction.shared.methodClass = signature.shared.methodClass;
-                newFunction.shared.parameters = [...typeParams, ...signature.shared.parameters];
-                newFunction.shared.typeParams = [...getitemCallType.shared.typeParams, ...signature.shared.typeParams];
+                newFunction.shared.parameters = [...typeParamsParam, ...signature.shared.parameters];
+                newFunction.shared.typeParams = [...typeParams, ...signature.shared.typeParams];
                 newFunction.shared.typeVarScopeId = signature.shared.typeVarScopeId;
                 const specializedNewFunction = applySolvedTypeVars(newFunction, solution);
                 return isFunction(specializedNewFunction) ? specializedNewFunction : undefined;
