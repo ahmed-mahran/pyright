@@ -232,7 +232,6 @@ export class ConstraintSet {
 }
 
 export class ConstraintTracker {
-    private _isLocked = false;
     private _constraintSets: ConstraintSet[];
 
     constructor(private _evaluator: TypeEvaluator) {
@@ -243,7 +242,6 @@ export class ConstraintTracker {
         const newTypeVarMap = new ConstraintTracker(this._evaluator);
 
         newTypeVarMap._constraintSets = this._constraintSets.map((set) => set.clone());
-        newTypeVarMap._isLocked = this._isLocked;
 
         return newTypeVarMap;
     }
@@ -269,7 +267,6 @@ export class ConstraintTracker {
     // Copies a cloned type var context back into this object.
     copyFromClone(clone: ConstraintTracker) {
         this._constraintSets = clone._constraintSets.map((context) => context.clone());
-        this._isLocked = clone._isLocked;
     }
 
     copyBounds(entry: TypeVarConstraints) {
@@ -297,34 +294,16 @@ export class ConstraintTracker {
         return this._constraintSets.every((set, index) => set.isSame(other._constraintSets[index]));
     }
 
-    lock() {
-        // Locks the type var map, preventing any further changes.
-        assert(!this._isLocked);
-        this._isLocked = true;
-    }
-
-    unlock() {
-        // Unlocks the type var map, allowing further changes.
-        this._isLocked = false;
-    }
-
-    isLocked(): boolean {
-        return this._isLocked;
-    }
-
     isEmpty() {
         return this._constraintSets.every((set) => set.isEmpty());
     }
 
     setBounds(typeVar: TypeVarType, lowerBound: Type | undefined, upperBound?: Type, retainLiterals?: boolean) {
-        // assert(!this._isLocked);
-        if (!this._isLocked) {
-            const adjustedLowerBound = MyPyrightExtensions.createBoundForTypeVar(this._evaluator, typeVar, lowerBound);
-            const adjustedUpperBound = MyPyrightExtensions.createBoundForTypeVar(this._evaluator, typeVar, upperBound);
-            return this._constraintSets.forEach((set) => {
-                set.setBounds(typeVar, adjustedLowerBound, adjustedUpperBound, retainLiterals);
-            });
-        }
+        const adjustedLowerBound = MyPyrightExtensions.createBoundForTypeVar(this._evaluator, typeVar, lowerBound);
+        const adjustedUpperBound = MyPyrightExtensions.createBoundForTypeVar(this._evaluator, typeVar, upperBound);
+        return this._constraintSets.forEach((set) => {
+            set.setBounds(typeVar, adjustedLowerBound, adjustedUpperBound, retainLiterals);
+        });
     }
 
     getScore() {
@@ -347,16 +326,9 @@ export class ConstraintTracker {
     }
 
     doForEachConstraintSet(callback: (constraintSet: ConstraintSet, index: number) => void) {
-        const wasLocked = this.isLocked();
-        this.unlock();
-
         this.getConstraintSets().forEach((set, index) => {
             callback(set, index);
         });
-
-        if (wasLocked) {
-            this.lock();
-        }
     }
 
     getConstraintSet(index: number) {
@@ -389,7 +361,6 @@ export class ConstraintTracker {
                     result._constraintSets.push(combinedSet);
                 }
             }
-            result._isLocked = allConstraints.some((constraints) => constraints._isLocked);
             return result;
         } else if (allConstraints.length === 1) {
             return allConstraints[0];

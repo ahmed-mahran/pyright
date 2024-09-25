@@ -126,7 +126,7 @@ export function assignTupleTypeArgs(
         // and evaluate those with type vars as well to get all possible bounds of the type vars
         if (!isAssignable || destTypeArgsCombination.some((destArg) => hasTypeVar(destArg.type))) {
             for (const srcTypeArgsCombination of srcTypeArgsCombinations) {
-                const clonedConstraints = !constraints || constraints.isLocked() ? constraints : constraints.clone();
+                const clonedConstraints = constraints ? constraints.clone() : undefined;
                 const newDiag = diag ? new DiagnosticAddendum() : undefined;
                 if (
                     assignTupleTypeArgsInternal(
@@ -140,7 +140,7 @@ export function assignTupleTypeArgs(
                     )
                 ) {
                     isAssignable = true;
-                    if (clonedConstraints && !clonedConstraints.isLocked()) {
+                    if (clonedConstraints) {
                         constraintsFromAssignableCombinations.push(clonedConstraints);
                     }
                 } else if (newDiag) {
@@ -150,7 +150,7 @@ export function assignTupleTypeArgs(
         }
     }
 
-    if (constraints && !constraints.isLocked() && constraintsFromAssignableCombinations.length > 0) {
+    if (constraints && constraintsFromAssignableCombinations.length > 0) {
         constraints.addCombinedConstraints(constraintsFromAssignableCombinations);
     }
 
@@ -250,7 +250,7 @@ export function assignTupleTypeArgsInternal(
             return false;
         }
 
-        if (constraints && !constraints.isLocked()) {
+        if (constraints) {
             function isSingleTypeVarTuple(seq: TupleTypeArg[]) {
                 return seq.length === 1 && isTypeVarTuple(seq[0].type);
             }
@@ -459,7 +459,9 @@ export function matchTupleTypeArgs(
                     destType.type,
                     srcType.type,
                     /* diag */ undefined,
-                    constraints,
+                    // We are testing combinations of matches, so we don't want to change any constraints
+                    // based on any invalid combinations.
+                    constraints ? constraints.clone() : undefined,
                     // // matching repeated VS non-repeated needs to build up new constraints,
                     // // as the repeated element is collecting more non-repeated elements
                     // (isIndeterminate(destType) && isIndeterminate(srcType)) ||
@@ -477,12 +479,12 @@ export function matchTupleTypeArgs(
         }
     };
 
-    // We are testing combinations of matches, so we don't want to change any constraints
-    // based on any invalid combinations.
-    const wasLocked = constraints?.isLocked();
-    if (!wasLocked) {
-        constraints?.lock();
-    }
+    // // We are testing combinations of matches, so we don't want to change any constraints
+    // // based on any invalid combinations.
+    // const wasLocked = constraints?.isLocked();
+    // if (!wasLocked) {
+    //     constraints?.lock();
+    // }
     const matchedTypeArgs = matchAccumulateSequence<TupleTypeArg, TupleTypeArg>(
         destTypeArgs,
         srcTypeArgs,
@@ -493,9 +495,9 @@ export function matchTupleTypeArgs(
         toStr,
         recursionCount
     );
-    if (!wasLocked) {
-        constraints?.unlock();
-    }
+    // if (!wasLocked) {
+    //     constraints?.unlock();
+    // }
 
     return matchedTypeArgs;
 }

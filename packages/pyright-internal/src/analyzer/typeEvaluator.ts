@@ -421,7 +421,6 @@ interface AssignClassToSelfInfo {
 interface ParamAssignmentInfo {
     argsNeeded: number;
     argsReceived: number;
-    isPositionalOnly: boolean;
 }
 
 interface MatchedOverloadInfo {
@@ -7896,9 +7895,9 @@ export function createTypeEvaluator(
                         if (impl) {
                             impl = getTypeOfIndexForOverload(impl);
                             if (!!impl && CallableType.isCallableType(impl) && impl.shared.name === '') {
-                                    impl.shared.name = functionName;
-                                }
+                                impl.shared.name = functionName;
                             }
+                        }
                         if (impl || newOverloads.length > 0) {
                             return OverloadedType.create(newOverloads, impl);
                         }
@@ -9522,7 +9521,6 @@ export function createTypeEvaluator(
 
                 // Clone the constraints so we don't modify the original.
                 const effectiveConstraints = constraints?.clone() ?? new ConstraintTracker(evaluatorInterface);
-                effectiveConstraints.unlock();
 
                 // Use speculative mode so we don't output any diagnostics or
                 // record any final types in the type cache.
@@ -9655,7 +9653,6 @@ export function createTypeEvaluator(
         // And run through the first expanded argument list one more time to
         // populate the type cache.
         const finalConstraints = constraints ?? matchedOverloads[0].constraints;
-        finalConstraints.unlock();
         const finalCallResult = validateArgTypesWithContext(
             errorNode,
             matchedOverloads[0].matchResults,
@@ -9919,7 +9916,6 @@ export function createTypeEvaluator(
             }
 
             const effectiveConstraints = constraints ?? new ConstraintTracker(evaluatorInterface);
-            effectiveConstraints.unlock();
 
             return validateArgTypesWithContext(
                 errorNode,
@@ -11009,11 +11005,11 @@ export function createTypeEvaluator(
         paramDetails.params.forEach((paramInfo) => {
             assert(paramInfo !== undefined, 'paramInfo is undefined for param name map');
             const param = paramInfo.param;
-            if (param.name && param.category === ParamCategory.Simple) {
+
+            if (param.name && param.category === ParamCategory.Simple && paramInfo.kind !== ParamKind.Positional) {
                 paramMap.set(param.name, {
                     argsNeeded: param.category === ParamCategory.Simple && !paramInfo.defaultType ? 1 : 0,
                     argsReceived: 0,
-                    isPositionalOnly: paramInfo.kind === ParamKind.Positional,
                 });
             }
         });
@@ -11397,20 +11393,22 @@ export function createTypeEvaluator(
                     }
                 }
             } else {
-                const paramName = paramDetails.params[paramIndex].param.name;
+                const paramInfo = paramDetails.params[paramIndex];
+                const paramName = paramInfo.param.name;
+
                 validateArgTypeParams.push({
-                    paramCategory: paramDetails.params[paramIndex].param.category,
+                    paramCategory: paramInfo.param.category,
                     paramType,
                     requiresTypeVarMatching: requiresSpecialization(paramType),
                     argument: argList[argIndex],
                     errorNode: argList[argIndex].valueExpression || errorNode,
                     paramName,
-                    isParamNameSynthesized: FunctionParam.isNameSynthesized(paramDetails.params[paramIndex].param),
+                    isParamNameSynthesized: FunctionParam.isNameSynthesized(paramInfo.param),
                 });
-                trySetActive(argList[argIndex], paramDetails.params[paramIndex].param);
+                trySetActive(argList[argIndex], paramInfo.param);
 
                 // Note that the parameter has received an argument.
-                if (paramName && paramMap.has(paramName)) {
+                if (paramName && paramMap.has(paramName) && paramInfo.kind !== ParamKind.Positional) {
                     paramMap.get(paramName)!.argsReceived++;
                 }
 
@@ -11511,7 +11509,7 @@ export function createTypeEvaluator(
 
                         tdEntries.knownItems.forEach((entry, name) => {
                             const paramEntry = paramMap.get(name);
-                            if (paramEntry && !paramEntry.isPositionalOnly) {
+                            if (paramEntry) {
                                 if (paramEntry.argsReceived > 0) {
                                     diag.addMessage(LocMessage.paramAlreadyAssigned().format({ name }));
                                 } else {
@@ -11553,7 +11551,6 @@ export function createTypeEvaluator(
                                 paramMap.set(name, {
                                     argsNeeded: 1,
                                     argsReceived: 1,
-                                    isPositionalOnly: false,
                                 });
                             } else {
                                 // If the function doesn't have a **kwargs parameter, we need to emit an error.
@@ -11695,7 +11692,8 @@ export function createTypeEvaluator(
                     if (paramName) {
                         const paramNameValue = paramName.d.value;
                         const paramEntry = paramMap.get(paramNameValue);
-                        if (paramEntry && !paramEntry.isPositionalOnly) {
+
+                        if (paramEntry) {
                             if (paramEntry.argsReceived > 0) {
                                 if (!canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
                                     addDiagnostic(
@@ -11709,7 +11707,9 @@ export function createTypeEvaluator(
                                 paramEntry.argsReceived++;
 
                                 const paramInfoIndex = paramDetails.params.findIndex(
-                                    (paramInfo) => paramInfo.param.name === paramNameValue
+                                    (paramInfo) =>
+                                        paramInfo.param.name === paramNameValue &&
+                                        paramInfo.kind !== ParamKind.Positional
                                 );
                                 assert(paramInfoIndex >= 0);
                                 const paramType = paramDetails.params[paramInfoIndex].type;
@@ -11751,7 +11751,6 @@ export function createTypeEvaluator(
                                 paramMap.set(paramNameValue, {
                                     argsNeeded: 1,
                                     argsReceived: 1,
-                                    isPositionalOnly: false,
                                 });
                                 assert(
                                     paramDetails.params[paramDetails.kwargsIndex],
@@ -11887,8 +11886,9 @@ export function createTypeEvaluator(
                 paramDetails.params.forEach((paramInfo) => {
                     const param = paramInfo.param;
                     if (param.category === ParamCategory.Simple && param.name) {
-                        const entry = paramMap.get(param.name)!;
-                        if (entry.argsNeeded === 0 && entry.argsReceived === 0) {
+                        const entry = paramMap.get(param.name);
+
+                        if (entry && entry.argsNeeded === 0 && entry.argsReceived === 0) {
                             const defaultArgType = paramInfo.defaultType;
 
                             if (
@@ -12322,10 +12322,6 @@ export function createTypeEvaluator(
                     });
                 });
             }
-
-            // Lock the type var map so it cannot be modified when revalidating
-            // the arguments in a second pass.
-            constraints.lock();
         }
 
         let sawParamSpecArgs = false;
@@ -17029,7 +17025,16 @@ export function createTypeEvaluator(
                     typeParamVariance: Variance.Invariant,
                 },
             ],
-            ['TypeForm', { alias: '', module: 'builtins', isSpecialForm: true, typeParamVariance: Variance.Covariant }],
+            [
+                'TypeForm',
+                {
+                    alias: '',
+                    module: 'builtins',
+                    isSpecialForm: true,
+                    typeParamVariance: Variance.Covariant,
+                    isIllegalInIsinstance: true,
+                },
+            ],
         ]);
 
         const aliasMapEntry = specialTypes.get(assignedName);
@@ -18654,7 +18659,11 @@ export function createTypeEvaluator(
                     const paramMap = new Map<string, number>();
                     for (let i = paramListDetails.firstKeywordOnlyIndex; i < paramListDetails.params.length; i++) {
                         const paramInfo = paramListDetails.params[i];
-                        if (paramInfo.param.category === ParamCategory.Simple && paramInfo.param.name) {
+                        if (
+                            paramInfo.param.category === ParamCategory.Simple &&
+                            paramInfo.param.name &&
+                            paramInfo.kind !== ParamKind.Positional
+                        ) {
                             paramMap.set(paramInfo.param.name, i);
                         }
                     }
@@ -24264,7 +24273,7 @@ export function createTypeEvaluator(
             );
         }
 
-        if (constraints && curSrcType.priv.typeArgs && !constraints.isLocked()) {
+        if (constraints && curSrcType.priv.typeArgs) {
             // Populate the typeVar map with type arguments of the source.
             const srcTypeArgs = curSrcType.priv.typeArgs;
             for (let i = 0; i < destType.shared.typeParams.length; i++) {
@@ -25601,7 +25610,7 @@ export function createTypeEvaluator(
                 return;
             }
 
-            const subtypeConstraints = !constraints || constraints.isLocked() ? constraints : constraints.clone();
+            const subtypeConstraints = constraints ? constraints.clone() : undefined;
 
             if (!assignType(destType, subtype, /* diag */ undefined, subtypeConstraints, flags, recursionCount)) {
                 // Determine if the current subtype is subsumed by another subtype
@@ -25628,7 +25637,7 @@ export function createTypeEvaluator(
             }
         }, /* sortSubtypes */ true);
 
-        if (constraints && !constraints.isLocked()) {
+        if (constraints) {
             constraints.addCombinedConstraints(unionConstraints);
         }
 
@@ -25661,10 +25670,6 @@ export function createTypeEvaluator(
         srcType: UnknownType | AnyType,
         constraints: ConstraintTracker
     ) {
-        if (constraints.isLocked()) {
-            return;
-        }
-
         const typeVars = getTypeVarArgsRecursive(destType);
         typeVars.forEach((typeVar) => {
             if (!TypeVarType.isBound(typeVar) && !constraints.getMainConstraintSet().getTypeVar(typeVar)) {
@@ -26634,7 +26639,11 @@ export function createTypeEvaluator(
             if (destParamDetails.firstKeywordOnlyIndex !== undefined) {
                 destParamDetails.params.forEach((param, index) => {
                     if (index >= destParamDetails.firstKeywordOnlyIndex!) {
-                        if (param.param.name && param.param.category === ParamCategory.Simple) {
+                        if (
+                            param.param.name &&
+                            param.param.category === ParamCategory.Simple &&
+                            param.kind !== ParamKind.Positional
+                        ) {
                             destParamMap.set(param.param.name, param);
                         }
                     }
@@ -28023,14 +28032,12 @@ export function createTypeEvaluator(
                 // contain references to themselves or their subclasses, so if
                 // we attempt to call assignType, we'll risk infinite recursion.
                 // Instead, we'll assume it's assignable.
-                if (!constraints.isLocked()) {
-                    constraints.setBounds(
-                        memberTypeFirstParamType,
-                        TypeBase.isInstantiable(memberTypeFirstParamType)
-                            ? convertToInstance(firstParamType)
-                            : firstParamType
-                    );
-                }
+                constraints.setBounds(
+                    memberTypeFirstParamType,
+                    TypeBase.isInstantiable(memberTypeFirstParamType)
+                        ? convertToInstance(firstParamType)
+                        : firstParamType
+                );
             } else if (!(skipFirstParamAssignmentCheck || isTypeSame(memberTypeFirstParamType, firstParamType))) {
                 const subDiag = diag?.createAddendum();
 
