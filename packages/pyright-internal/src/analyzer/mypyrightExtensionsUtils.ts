@@ -723,7 +723,8 @@ export namespace MyPyrightExtensions {
         return (
             classType.shared.fullName === 'mypyright_extensions.subscriptable' ||
             classType.shared.fullName === 'mypyright_extensions.subscriptablefunction' ||
-            classType.shared.fullName === 'mypyright_extensions.subscriptablemethod'
+            classType.shared.fullName === 'mypyright_extensions.subscriptablemethod' ||
+            classType.shared.fullName === 'mypyright_extensions.subscriptableclassmethod'
         );
     }
 }
