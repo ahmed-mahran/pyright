@@ -437,7 +437,6 @@ interface ValidateArgTypeOptions {
     isArgFirstPass?: boolean;
     conditionFilter?: TypeCondition[];
     skipReportError?: boolean;
-    isArgAssignmentCovariant?: boolean;
 }
 
 interface EffectiveReturnTypeOptions {
@@ -2685,7 +2684,6 @@ export function createTypeEvaluator(
                     { type },
                     /* constraints */ undefined,
                     /* skipUnknownArgCheck */ true,
-                    /* isArgAssignmentCovariant */ undefined,
                     /* inferenceContext */ undefined
                 );
             });
@@ -4649,7 +4647,6 @@ export function createTypeEvaluator(
                                 [],
                                 concreteSubtype,
                                 /* skipUnknownArgCheck */ false,
-                                /* isArgAssignmentCovariant */ undefined,
                                 /* inferenceContext */ undefined
                             );
                         });
@@ -6690,7 +6687,6 @@ export function createTypeEvaluator(
                     { type: methodType },
                     /* constraints */ undefined,
                     /* skipUnknownArgCheck */ true,
-                    /* isArgAssignmentCovariant */ undefined,
                     /* inferenceContext */ undefined
                 );
             },
@@ -6958,7 +6954,6 @@ export function createTypeEvaluator(
             { type: accessMemberType },
             /* constraints */ undefined,
             /* skipUnknownArgCheck */ true,
-            /* isArgAssignmentCovariant */ undefined,
             /* inferenceContext */ undefined
         );
 
@@ -8239,7 +8234,6 @@ export function createTypeEvaluator(
             { type: itemMethodType },
             /* constraints */ undefined,
             /* skipUnknownArgCheck */ true,
-            /* isArgAssignmentCovariant */ undefined,
             /* inferenceContext */ undefined
         );
 
@@ -8775,7 +8769,6 @@ export function createTypeEvaluator(
                     baseTypeResult,
                     /* constraints */ undefined,
                     /* skipUnknownArgCheck */ false,
-                    /* isArgAssignmentCovariant */ undefined,
                     inferenceContext
                 );
 
@@ -9486,7 +9479,6 @@ export function createTypeEvaluator(
         argParamMatches: MatchArgsToParamsResult[],
         constraints: ConstraintTracker | undefined,
         skipUnknownArgCheck: boolean | undefined,
-        isArgAssignmentCovariant: boolean | undefined,
         inferenceContext: InferenceContext | undefined
     ): CallResult {
         const returnTypes: Type[] = [];
@@ -9531,7 +9523,6 @@ export function createTypeEvaluator(
                         matchResults,
                         effectiveConstraints,
                         /* skipUnknownArgCheck */ true,
-                        isArgAssignmentCovariant,
                         inferenceContext
                     );
                 });
@@ -9659,7 +9650,6 @@ export function createTypeEvaluator(
             matchedOverloads[0].matchResults,
             finalConstraints,
             skipUnknownArgCheck,
-            isArgAssignmentCovariant,
             inferenceContext
         );
 
@@ -9778,8 +9768,7 @@ export function createTypeEvaluator(
                         errorNode,
                         match,
                         new ConstraintTracker(evaluatorInterface),
-                        /* skipUnknownArgCheck */ true,
-                        /* isArgAssignmentCovariant */ undefined
+                        /* skipUnknownArgCheck */ true
                     );
 
                     if (callResult && !callResult.argumentErrors) {
@@ -9809,7 +9798,6 @@ export function createTypeEvaluator(
         typeResult: TypeResult<OverloadedType>,
         constraints: ConstraintTracker | undefined,
         skipUnknownArgCheck: boolean | undefined,
-        isArgAssignmentCovariant: boolean | undefined,
         inferenceContext: InferenceContext | undefined
     ): CallResult {
         let filteredMatchResults: MatchArgsToParamsResult[] = [];
@@ -9923,7 +9911,6 @@ export function createTypeEvaluator(
                 bestMatch,
                 effectiveConstraints,
                 skipUnknownArgCheck,
-                isArgAssignmentCovariant,
                 inferenceContext
             );
         }
@@ -9947,7 +9934,6 @@ export function createTypeEvaluator(
                 filteredMatchResults,
                 constraints,
                 skipUnknownArgCheck,
-                isArgAssignmentCovariant,
                 inferenceContext
             );
 
@@ -10076,7 +10062,6 @@ export function createTypeEvaluator(
         callTypeResult: TypeResult,
         constraints: ConstraintTracker | undefined,
         skipUnknownArgCheck: boolean | undefined,
-        isArgAssignmentCovariant: boolean | undefined,
         inferenceContext: InferenceContext | undefined,
         recursionCount = 0
     ): CallResult {
@@ -10118,7 +10103,6 @@ export function createTypeEvaluator(
                             !!callTypeResult.isIncomplete,
                             constraints,
                             skipUnknownArgCheck,
-                            isArgAssignmentCovariant,
                             inferenceContext,
                             recursionCount
                         );
@@ -10170,7 +10154,6 @@ export function createTypeEvaluator(
         isCallTypeIncomplete: boolean,
         constraints: ConstraintTracker | undefined,
         skipUnknownArgCheck: boolean | undefined,
-        isArgAssignmentCovariant: boolean | undefined,
         inferenceContext: InferenceContext | undefined,
         recursionCount: number
     ): CallResult {
@@ -10200,7 +10183,6 @@ export function createTypeEvaluator(
                     isCallTypeIncomplete,
                     constraints,
                     skipUnknownArgCheck,
-                    isArgAssignmentCovariant,
                     inferenceContext
                 );
             }
@@ -10213,7 +10195,6 @@ export function createTypeEvaluator(
                     isCallTypeIncomplete,
                     constraints,
                     skipUnknownArgCheck,
-                    isArgAssignmentCovariant,
                     inferenceContext
                 );
             }
@@ -10232,7 +10213,6 @@ export function createTypeEvaluator(
                         expandedCallType,
                         unexpandedCallType,
                         skipUnknownArgCheck,
-                        isArgAssignmentCovariant,
                         inferenceContext
                     );
                 }
@@ -10244,7 +10224,6 @@ export function createTypeEvaluator(
                     unexpandedCallType,
                     constraints,
                     skipUnknownArgCheck,
-                    isArgAssignmentCovariant,
                     inferenceContext,
                     recursionCount
                 );
@@ -10264,7 +10243,6 @@ export function createTypeEvaluator(
                     },
                     constraints,
                     skipUnknownArgCheck,
-                    isArgAssignmentCovariant,
                     inferenceContext,
                     recursionCount
                 );
@@ -10287,7 +10265,6 @@ export function createTypeEvaluator(
         isCallTypeIncomplete: boolean,
         constraints: ConstraintTracker | undefined,
         skipUnknownArgCheck: boolean | undefined,
-        isArgAssignmentCovariant: boolean | undefined,
         inferenceContext: InferenceContext | undefined
     ): CallResult {
         if (TypeBase.isInstantiable(type)) {
@@ -10310,15 +10287,7 @@ export function createTypeEvaluator(
                 returnType: createNamedTupleType(evaluatorInterface, errorNode, argList, /* includesTypes */ false),
             };
 
-            validateArgs(
-                errorNode,
-                argList,
-                { type: type },
-                constraints,
-                skipUnknownArgCheck,
-                isArgAssignmentCovariant,
-                inferenceContext
-            );
+            validateArgs(errorNode, argList, { type: type }, constraints, skipUnknownArgCheck, inferenceContext);
 
             return result;
         }
@@ -10334,7 +10303,6 @@ export function createTypeEvaluator(
             { type, isIncomplete: isCallTypeIncomplete },
             constraints,
             skipUnknownArgCheck,
-            isArgAssignmentCovariant,
             inferenceContext
         );
 
@@ -10473,7 +10441,6 @@ export function createTypeEvaluator(
         isCallTypeIncomplete: boolean,
         constraints: ConstraintTracker | undefined,
         skipUnknownArgCheck: boolean | undefined,
-        isArgAssignmentCovariant: boolean | undefined,
         inferenceContext: InferenceContext | undefined
     ): CallResult {
         const overloads = OverloadedType.getOverloads(expandedCallType);
@@ -10493,7 +10460,6 @@ export function createTypeEvaluator(
             { type: expandedCallType, isIncomplete: isCallTypeIncomplete },
             constraints,
             skipUnknownArgCheck,
-            isArgAssignmentCovariant,
             inferenceContext
         );
 
@@ -10534,7 +10500,6 @@ export function createTypeEvaluator(
         expandedCallType: ClassType,
         unexpandedCallType: Type,
         skipUnknownArgCheck: boolean | undefined,
-        isArgAssignmentCovariant: boolean | undefined,
         inferenceContext: InferenceContext | undefined
     ): CallResult {
         if (expandedCallType.priv.literalValue !== undefined) {
@@ -10566,7 +10531,6 @@ export function createTypeEvaluator(
                     argList,
                     expandedCallType,
                     skipUnknownArgCheck,
-                    isArgAssignmentCovariant,
                     inferenceContext
                 );
 
@@ -10656,7 +10620,6 @@ export function createTypeEvaluator(
                         { type: initTypeResult.type },
                         /* constraints */ undefined,
                         skipUnknownArgCheck,
-                        isArgAssignmentCovariant,
                         /* inferenceContext */ undefined
                     );
                 }
@@ -10762,7 +10725,6 @@ export function createTypeEvaluator(
             argList,
             expandedCallType,
             skipUnknownArgCheck,
-            isArgAssignmentCovariant,
             inferenceContext
         );
 
@@ -10841,7 +10803,6 @@ export function createTypeEvaluator(
         unexpandedCallType: Type,
         constraints: ConstraintTracker | undefined,
         skipUnknownArgCheck: boolean | undefined,
-        isArgAssignmentCovariant: boolean | undefined,
         inferenceContext: InferenceContext | undefined,
         recursionCount: number
     ): CallResult {
@@ -10876,7 +10837,6 @@ export function createTypeEvaluator(
             { type: callMethodType },
             constraints,
             skipUnknownArgCheck,
-            isArgAssignmentCovariant,
             inferenceContext,
             recursionCount
         );
@@ -12044,7 +12004,6 @@ export function createTypeEvaluator(
         matchResults: MatchArgsToParamsResult,
         constraints: ConstraintTracker,
         skipUnknownArgCheck = false,
-        isArgAssignmentCovariant = false,
         inferenceContext: InferenceContext | undefined
     ): CallResult {
         const type = matchResults.overload;
@@ -12065,7 +12024,6 @@ export function createTypeEvaluator(
                 matchResults,
                 clonedConstraints,
                 /* skipUnknownArgCheck */ true,
-                isArgAssignmentCovariant,
                 expectedSubtype,
                 returnType
             );
@@ -12142,13 +12100,7 @@ export function createTypeEvaluator(
         // If there is no expected type, or the expected type is Any or Unknown,
         // there's nothing left to do here.
         if (!expectedType || isAnyOrUnknown(expectedType) || isNever(expectedType)) {
-            return validateArgTypes(
-                errorNode,
-                matchResults,
-                constraints,
-                skipUnknownArgCheck,
-                isArgAssignmentCovariant
-            );
+            return validateArgTypes(errorNode, matchResults, constraints, skipUnknownArgCheck);
         }
 
         return validateArgTypesWithExpectedType(
@@ -12156,7 +12108,6 @@ export function createTypeEvaluator(
             matchResults,
             constraints,
             skipUnknownArgCheck,
-            isArgAssignmentCovariant,
             expectedType,
             returnType
         );
@@ -12167,7 +12118,6 @@ export function createTypeEvaluator(
         matchResults: MatchArgsToParamsResult,
         constraints: ConstraintTracker,
         skipUnknownArgCheck = false,
-        isArgAssignmentCovariant = false,
         expectedType: Type,
         returnType: Type
     ): CallResult {
@@ -12211,15 +12161,14 @@ export function createTypeEvaluator(
 
         assignType(returnType, expectedType, /* diag */ undefined, constraints, assignFlags);
 
-        return validateArgTypes(errorNode, matchResults, constraints, skipUnknownArgCheck, isArgAssignmentCovariant);
+        return validateArgTypes(errorNode, matchResults, constraints, skipUnknownArgCheck);
     }
 
     function validateArgTypes(
         errorNode: ExpressionNode,
         matchResults: MatchArgsToParamsResult,
         constraints: ConstraintTracker,
-        skipUnknownArgCheck: boolean | undefined,
-        isArgAssignmentCovariant: boolean | undefined
+        skipUnknownArgCheck: boolean | undefined
     ): CallResult {
         const type = matchResults.overload;
         let isTypeIncomplete = matchResults.isTypeIncomplete;
@@ -12307,7 +12256,6 @@ export function createTypeEvaluator(
                                 isArgFirstPass: passCount > 1 && i === 0,
                                 conditionFilter: typeCondition,
                                 skipReportError: true,
-                                isArgAssignmentCovariant,
                             }
                         );
 
@@ -12339,7 +12287,6 @@ export function createTypeEvaluator(
                 {
                     skipUnknownArgCheck,
                     conditionFilter: typeCondition,
-                    isArgAssignmentCovariant,
                 }
             );
 
@@ -12586,7 +12533,6 @@ export function createTypeEvaluator(
         typeResult: TypeResult<FunctionType>,
         constraints: ConstraintTracker | undefined,
         skipUnknownArgCheck = false,
-        isArgAssignmentCovariant = false,
         inferenceContext: InferenceContext | undefined
     ): CallResult {
         const matchResults = matchArgsToParams(errorNode, argList, typeResult, 0);
@@ -12612,7 +12558,6 @@ export function createTypeEvaluator(
             matchResults,
             constraints ?? new ConstraintTracker(evaluatorInterface),
             skipUnknownArgCheck,
-            isArgAssignmentCovariant,
             makeInferenceContext(
                 inferenceContext?.expectedType,
                 inferenceContext?.isTypeIncomplete,
@@ -12751,13 +12696,7 @@ export function createTypeEvaluator(
             return { argumentErrors, constraintTrackers: [constraints] };
         }
 
-        const result = validateArgTypes(
-            errorNode,
-            matchResults,
-            constraints,
-            /* skipUnknownArgCheck */ undefined,
-            /* isArgAssignmentCovariant */ undefined
-        );
+        const result = validateArgTypes(errorNode, matchResults, constraints, /* skipUnknownArgCheck */ undefined);
         return { argumentErrors: !!result.argumentErrors, constraintTrackers: [constraints] };
     }
 
@@ -12844,10 +12783,6 @@ export function createTypeEvaluator(
                         assignTypeFlags |= AssignTypeFlags.ArgAssignmentFirstPass;
                     }
 
-                    if (options?.isArgAssignmentCovariant) {
-                        assignTypeFlags |= AssignTypeFlags.ArgAssignmentCovariant;
-                    }
-
                     if (assignType(expectedType, argType, /* diag */ undefined, clonedConstraints, assignTypeFlags)) {
                         constraints.copyFromClone(clonedConstraints);
                     } else {
@@ -12930,10 +12865,6 @@ export function createTypeEvaluator(
 
         if (options?.isArgFirstPass) {
             assignTypeFlags |= AssignTypeFlags.ArgAssignmentFirstPass;
-        }
-
-        if (options?.isArgAssignmentCovariant) {
-            assignTypeFlags |= AssignTypeFlags.ArgAssignmentCovariant;
         }
 
         if (!assignType(argParam.paramType, argType, diag?.createAddendum(), constraints, assignTypeFlags)) {
@@ -13948,7 +13879,6 @@ export function createTypeEvaluator(
                         { type: magicMethodType },
                         /* constraints */ undefined,
                         /* skipUnknownArgCheck */ true,
-                        /* isArgAssignmentCovariant */ undefined,
                         inferenceContext
                     );
                 });
@@ -13964,7 +13894,6 @@ export function createTypeEvaluator(
                             { type: magicMethodType },
                             /* constraints */ undefined,
                             /* skipUnknownArgCheck */ true,
-                            /* isArgAssignmentCovariant */ undefined,
                             /* inferenceContext */ undefined
                         );
                     });
@@ -16469,7 +16398,6 @@ export function createTypeEvaluator(
                 { type: supportsTypeMethod },
                 /* constraints */ undefined,
                 /* skipUnknownArgCheck */ true,
-                /* isArgAssignmentCovariant */ undefined,
                 /* inferenceContext */ undefined
             )
         );
@@ -18746,7 +18674,6 @@ export function createTypeEvaluator(
                         { type: initSubclassMethodType },
                         /* constraints */ undefined,
                         /* skipUnknownArgCheck */ false,
-                        /* isArgAssignmentCovariant */ undefined,
                         makeInferenceContext(getNoneType())
                     );
 
@@ -26122,7 +26049,6 @@ export function createTypeEvaluator(
         let specializedSrcType = srcType;
         let specializedDestType = destType;
         let doSpecializationStep = false;
-        const isContraAssignment = (flags & AssignTypeFlags.ArgAssignmentCovariant) === 0;
 
         if ((flags & AssignTypeFlags.OverloadOverlap) === 0) {
             const isFirstPass = (flags & AssignTypeFlags.ArgAssignmentFirstPass) !== 0;
@@ -26151,8 +26077,8 @@ export function createTypeEvaluator(
         if (doSpecializationStep) {
             if (
                 assignType(
-                    isContraAssignment ? specializedSrcType : specializedDestType,
-                    isContraAssignment ? specializedDestType : specializedSrcType,
+                    specializedSrcType,
+                    specializedDestType,
                     /* diag */ undefined,
                     constraints,
                     (flags ^ AssignTypeFlags.Contravariant) | AssignTypeFlags.RetainLiteralsForTypeVar,
@@ -26169,8 +26095,8 @@ export function createTypeEvaluator(
 
         if (
             !assignType(
-                isContraAssignment ? specializedSrcType : specializedDestType,
-                isContraAssignment ? specializedDestType : specializedSrcType,
+                specializedSrcType,
+                specializedDestType,
                 diag?.createAddendum(),
                 constraints,
                 flags ^ AssignTypeFlags.Contravariant,
@@ -26181,8 +26107,8 @@ export function createTypeEvaluator(
                 diag.addMessage(
                     LocAddendum.paramAssignment().format({
                         index: paramIndex + 1,
-                        sourceType: printType(isContraAssignment ? destType : srcType),
-                        destType: printType(isContraAssignment ? srcType : destType),
+                        sourceType: printType(destType),
+                        destType: printType(srcType),
                     })
                 );
             }

@@ -5027,7 +5027,6 @@ export class Checker extends ParseTreeWalker {
                             newMemberTypeResult,
                             /* constraints */ undefined,
                             /* skipUnknownArgCheck */ undefined,
-                            /* isArgAssignmentCovariant */ undefined,
                             /* inferenceContext */ undefined
                         );
                     }
@@ -5039,7 +5038,6 @@ export class Checker extends ParseTreeWalker {
                             initMemberTypeResult,
                             /* constraints */ undefined,
                             /* skipUnknownArgCheck */ undefined,
-                            /* isArgAssignmentCovariant */ undefined,
                             /* inferenceContext */ undefined
                         );
                     }

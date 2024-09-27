@@ -115,7 +115,6 @@ export function validateConstructorArgs(
     argList: Arg[],
     type: ClassType,
     skipUnknownArgCheck: boolean | undefined,
-    isArgAssignmentCovariant: boolean | undefined,
     inferenceContext: InferenceContext | undefined
 ): CallResult {
     // If this is an unspecialized generic type alias, specialize it now
@@ -133,7 +132,6 @@ export function validateConstructorArgs(
         argList,
         type,
         skipUnknownArgCheck,
-        isArgAssignmentCovariant,
         inferenceContext,
         /* useSpeculativeModeForArgs */ true
     );
@@ -152,7 +150,6 @@ export function validateConstructorArgs(
                 argList,
                 type,
                 skipUnknownArgCheck,
-                isArgAssignmentCovariant,
                 inferenceContext,
                 /* useSpeculativeModeForArgs */ false
             );
@@ -179,7 +176,6 @@ export function validateConstructorArgs(
             argList,
             type,
             skipUnknownArgCheck,
-            isArgAssignmentCovariant,
             inferenceContext,
             newMethodTypeResult
         );
@@ -199,7 +195,6 @@ export function validateConstructorArgs(
                 argList,
                 type,
                 skipUnknownArgCheck,
-                isArgAssignmentCovariant,
                 inferenceContext,
                 newMethodTypeResult
             );
@@ -247,7 +242,6 @@ function validateNewAndInitMethods(
     argList: Arg[],
     type: ClassType,
     skipUnknownArgCheck: boolean | undefined,
-    isArgAssignmentCovariant: boolean | undefined,
     inferenceContext: InferenceContext | undefined,
     newMethodTypeResult: TypeResult | undefined
 ): CallResult {
@@ -268,7 +262,6 @@ function validateNewAndInitMethods(
             argList,
             type,
             skipUnknownArgCheck,
-            isArgAssignmentCovariant,
             inferenceContext,
             newMethodTypeResult,
             /* useSpeculativeModeForArgs */ true
@@ -346,7 +339,6 @@ function validateNewAndInitMethods(
                 argList,
                 initMethodBindToType,
                 skipUnknownArgCheck,
-                isArgAssignmentCovariant,
                 inferenceContext,
                 initMethodTypeResult.type
             );
@@ -377,7 +369,6 @@ function validateNewAndInitMethods(
                 argList,
                 type,
                 skipUnknownArgCheck,
-                isArgAssignmentCovariant,
                 inferenceContext,
                 newMethodTypeResult,
                 /* useSpeculativeModeForArgs */ false
@@ -418,7 +409,6 @@ function validateNewMethod(
     argList: Arg[],
     type: ClassType,
     skipUnknownArgCheck: boolean | undefined,
-    isArgAssignmentCovariant: boolean | undefined,
     inferenceContext: InferenceContext | undefined,
     newMethodTypeResult: TypeResult,
     useSpeculativeModeForArgs: boolean
@@ -437,7 +427,6 @@ function validateNewMethod(
             newMethodTypeResult,
             constraints,
             skipUnknownArgCheck,
-            isArgAssignmentCovariant,
             inferenceContext
         );
     });
@@ -456,7 +445,6 @@ function validateNewMethod(
             newMethodTypeResult,
             constraints,
             skipUnknownArgCheck,
-            isArgAssignmentCovariant,
             inferenceContext
         );
     } else {
@@ -492,7 +480,6 @@ function validateInitMethod(
     argList: Arg[],
     type: ClassType,
     skipUnknownArgCheck: boolean | undefined,
-    isArgAssignmentCovariant: boolean | undefined,
     inferenceContext: InferenceContext | undefined,
     initMethodType: Type
 ): CallResult {
@@ -512,7 +499,6 @@ function validateInitMethod(
         { type: initMethodType },
         constraints,
         skipUnknownArgCheck,
-        isArgAssignmentCovariant,
         inferenceContext ? { ...inferenceContext, returnTypeOverride } : undefined
     );
 
@@ -574,7 +560,6 @@ function validateFallbackConstructorCall(
         argList,
         type,
         /* skipUnknownArgCheck */ false,
-        /* isArgAssignmentCovariant */ undefined,
         inferenceContext,
         { type: newMethodType },
         /* useSpeculativeModeForArgs */ false
@@ -587,7 +572,6 @@ function validateMetaclassCall(
     argList: Arg[],
     type: ClassType,
     skipUnknownArgCheck: boolean | undefined,
-    isArgAssignmentCovariant: boolean | undefined,
     inferenceContext: InferenceContext | undefined,
     useSpeculativeModeForArgs: boolean
 ): CallResult | undefined {
@@ -604,7 +588,6 @@ function validateMetaclassCall(
             metaclassCallMethodInfo,
             /* constraints */ undefined,
             skipUnknownArgCheck,
-            isArgAssignmentCovariant,
             inferenceContext
         );
     });
