@@ -230,6 +230,7 @@ import {
     FunctionParamFlags,
     FunctionType,
     FunctionTypeFlags,
+    hasTypeVar,
     InheritanceChain,
     isAny,
     isAnyOrUnknown,
@@ -24682,13 +24683,22 @@ export function createTypeEvaluator(
                 }
             }
 
-            if ((flags & AssignTypeFlags.Contravariant) === 0 || !isTypeVar(srcType)) {
-                if (
-                    assignTypeVar(evaluatorInterface, destType, srcType, diag, constraints, flags, recursionCount) &&
-                    (!isAnyOrUnknown(srcType) || (flags & AssignTypeFlags.OverloadOverlap) === 0)
-                ) {
-                    return true;
+            if ((flags & AssignTypeFlags.Contravariant) === 0 || !hasTypeVar(srcType)) {
+                // if (
+                //     assignTypeVar(evaluatorInterface, destType, srcType, diag, constraints, flags, recursionCount) &&
+                //     (!isAnyOrUnknown(srcType) || (flags & AssignTypeFlags.OverloadOverlap) === 0)
+                // ) {
+                //     return true;
+                // }
+                if (!assignTypeVar(evaluatorInterface, destType, srcType, diag, constraints, flags, recursionCount)) {
+                    return false;
                 }
+
+                if (isAnyOrUnknown(srcType) && (flags & AssignTypeFlags.OverloadOverlap) !== 0) {
+                    return false;
+                }
+
+                return true;
             }
         }
 
@@ -24818,9 +24828,19 @@ export function createTypeEvaluator(
             }
         }
 
+        // Not sure why we need to makeTopLevelTypeVarsConcrete?
+        // - This loses opportunity to replace one type var by another (e.g. instead of A = B this makes A = object)
+        //   which is less preferred from a user perspective and loses opportunity of transitive type var resolution
+        //   (e.g. later on when B is resolved then we can resolve A)
+        // - makeTopLevelTypeVarsConcrete maybe reduces chances of recursion (e.g. A is bound to a type that uses B
+        //   and B is bound to a type that uses A, this can lead to recursive nested resolutions A[B[A[B[...]]]])
+        // - In case of contravariant assignment, we need to keep src type vars
         const expandedSrcType = makeTopLevelTypeVarsConcrete(srcType);
-        if (isUnion(expandedSrcType)) {
-            return assignFromUnionType(destType, expandedSrcType, diag, constraints, flags, recursionCount);
+        // if (isUnion(expandedSrcType)) {
+        //     return assignFromUnionType(destType, expandedSrcType, diag, constraints, flags, recursionCount);
+        // }
+        if (isUnion(srcType)) {
+            return assignFromUnionType(destType, srcType, diag, constraints, flags, recursionCount);
         }
 
         if (isUnion(destType)) {

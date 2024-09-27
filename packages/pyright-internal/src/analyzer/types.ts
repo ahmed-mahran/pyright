@@ -14,6 +14,7 @@ import { ClassDeclaration, FunctionDeclaration, SpecialBuiltInClassDeclaration }
 import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
 import { Symbol, SymbolTable } from './symbol';
 import { isTupleClass } from './typeUtils';
+import { TypeWalker } from './typeWalker';
 
 export const enum TypeCategory {
     // Name is not bound to a value of any type
@@ -3325,6 +3326,22 @@ export function isModule(type: Type): type is ModuleType {
 
 export function isTypeVar(type: Type): type is TypeVarType {
     return type.category === TypeCategory.TypeVar;
+}
+
+export function hasTypeVar(type: Type) {
+    if (isTypeVar(type)) {
+        return true;
+    }
+
+    let result = false;
+    class OnTypeVarStopWalker extends TypeWalker {
+        override visitTypeVar(type: TypeVarType): void {
+            result = true;
+            this.cancelWalk();
+        }
+    }
+    new OnTypeVarStopWalker().walk(type);
+    return result;
 }
 
 export function isParamSpec(type: Type): type is ParamSpecType {

@@ -20,6 +20,7 @@ import {
     AnyType,
     ClassType,
     combineTypes,
+    hasTypeVar,
     isAnyOrUnknown,
     isAnyUnknownOrObject,
     isClass,
@@ -46,7 +47,6 @@ import {
     isUnboundedTupleClass,
     specializeTupleClass,
 } from './typeUtils';
-import { TypeWalker } from './typeWalker';
 
 // Assigns the source type arguments to the dest type arguments. It assumed
 // the the caller has already verified that both the dest and source are
@@ -977,20 +977,4 @@ function getTupleSliceParam(
     }
 
     return value;
-}
-
-export function hasTypeVar(type: Type) {
-    if (isTypeVar(type)) {
-        return true;
-    }
-
-    let result = false;
-    class OnTypeVarStopWalker extends TypeWalker {
-        override visitTypeVar(type: TypeVarType): void {
-            result = true;
-            this.cancelWalk();
-        }
-    }
-    new OnTypeVarStopWalker().walk(type);
-    return result;
 }
