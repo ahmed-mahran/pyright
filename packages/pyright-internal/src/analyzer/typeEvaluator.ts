@@ -23789,16 +23789,37 @@ export function createTypeEvaluator(
             }
         }
 
-        return {
-            type: partiallySpecializeType(
-                evaluatorInterface,
-                typeResult.type,
-                member.classType,
-                getTypeClassType(),
-                selfClass
-            ),
-            isIncomplete: !!typeResult.isIncomplete,
-        };
+        const type = partiallySpecializeType(
+            evaluatorInterface,
+            typeResult.type,
+            member.classType,
+            getTypeClassType(),
+            selfClass
+        );
+
+        if (
+            !!selfClass &&
+            isClass(selfClass) &&
+            MyPyrightExtensions.isSubscriptable(selfClass) &&
+            isFunction(type) &&
+            type.shared.name === '__getitem__' &&
+            !!type.priv.specializedTypes
+        ) {
+            const originalFunction = CallableType.getUndecoratedType(selfClass);
+            if (isFunction(originalFunction)) {
+                const tpParamType = FunctionType.getParamType(
+                    originalFunction,
+                    FunctionType.isStaticMethod(originalFunction) ||
+                        !originalFunction.shared.methodClass ||
+                        !!originalFunction.priv.strippedFirstParamType
+                        ? 0
+                        : 1
+                );
+                type.priv.specializedTypes.parameterTypes[1] = TypeBase.cloneType(tpParamType);
+            }
+        }
+
+        return { type, isIncomplete: !!typeResult.isIncomplete };
     }
 
     function assignClass(
