@@ -26138,7 +26138,11 @@ export function createTypeEvaluator(
                     recursionCount
                 )
             ) {
-                specializedDestType = solveAndApplyConstraints(destType, constraints);
+                if ((flags & AssignTypeFlags.Contravariant) === 0) {
+                    specializedDestType = solveAndApplyConstraints(destType, constraints);
+                } else {
+                    specializedSrcType = solveAndApplyConstraints(srcType, constraints);
+                }
             }
         }
 
@@ -26148,7 +26152,7 @@ export function createTypeEvaluator(
                 isContraAssignment ? specializedDestType : specializedSrcType,
                 diag?.createAddendum(),
                 constraints,
-                flags,
+                flags ^ AssignTypeFlags.Contravariant,
                 recursionCount
             )
         ) {
