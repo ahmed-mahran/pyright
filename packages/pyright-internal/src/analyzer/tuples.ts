@@ -31,12 +31,14 @@ import {
     isUnion,
     isUnpacked,
     isUnpackedTypeVarTuple,
-    SubscriptKind,
     TupleTypeArg,
     Type,
     TypeBase,
     TypeVarKind,
-    TypeVarSubcript,
+    TypeVarTulpeIndexedVar,
+    TypeVarTupleSubscript,
+    TypeVarTupleSubscriptKind,
+    TypeVarTupleType,
     TypeVarType,
 } from './types';
 import {
@@ -562,41 +564,98 @@ export function matchTupleTypeArgs(
 // of that type var tuple. The function keeps track of how many times a source type var tuple is being
 // assigned to singular dest types and reflects that subscripted source type var tuple.
 function allocateSourceTypeVarTuples(matchedTypeArgs: { destSequence: TupleTypeArg[]; srcSequence: TupleTypeArg[] }[]) {
+    interface IndexedVarAcc {
+        index: number | undefined;
+        total: number;
+        isLast: boolean;
+    }
+
+    class IndexedVar {
+        acc: IndexedVarAcc;
+        offset: number;
+
+        constructor(acc: IndexedVarAcc, offset: number) {
+            this.acc = acc;
+            this.offset = offset;
+        }
+        nextOffset() {
+            this.acc.total += 1;
+            return new IndexedVar(this.acc, this.offset + 1);
+        }
+        nextIndexedVar() {
+            return new IndexedVar(
+                { index: this.acc.index === undefined ? 0 : this.acc.index + 1, total: 1, isLast: true },
+                0
+            );
+        }
+        toTypeVarTupleIndexedVar(): TypeVarTulpeIndexedVar {
+            return {
+                index: this.acc.index,
+                offset: this.offset,
+                total: this.acc.total,
+                isLastIndex: this.acc.isLast,
+            };
+        }
+    }
+
+    interface Subscript {
+        kind: TypeVarTupleSubscriptKind;
+        start: IndexedVar;
+        end?: IndexedVar;
+    }
+
     class TypeVarTupleIndexTracker {
-        counter: number = 0;
-        sliceFromStart: boolean = true;
-        constructor(typeVarTuple: TypeVarType) {}
+        lastIndexedVar: IndexedVar = new IndexedVar({ index: undefined, total: 0, isLast: true }, -1);
+        typeVarTuple: TypeVarTupleType;
+
+        constructor(typeVarTuple: TypeVarTupleType) {
+            this.typeVarTuple = typeVarTuple;
+        }
 
         // draws and allocates an index from this type var tuple when it matches a singular type
         allocateIndex() {
-            return this.counter++;
+            const start = this.lastIndexedVar.nextOffset();
+            this.lastIndexedVar = start;
+            return { kind: TypeVarTupleSubscriptKind.Index, start };
         }
 
-        // Allocates the rest of the type var tuple when it matches another type var tuple.
-        // There will be only one allocated slice as a type var tuple cannot match more than
-        // one type var tuple.
         allocateSlice() {
-            // If we have allocated indicies from this type var tuple, then this is a slice
-            // after the allocated indicies. Otherwise, we might be allocating indicies from
-            // end afterwards.
-            this.sliceFromStart = this.counter > 0;
+            const start = this.lastIndexedVar.nextOffset();
+            start.acc.isLast = false;
+            const end = this.lastIndexedVar.nextIndexedVar();
+            this.lastIndexedVar = end;
+            return { kind: TypeVarTupleSubscriptKind.Slice, start, end };
         }
 
         // Returns the corresponding subscript given the allocated index. When no index
         // is provided, it is assumed as an allocated slice and hence it returns the
         // subscript corresponding to the allocated slice. There will be only one allocated
         // slice as a type var tuple cannot match more than one type var tuple.
-        getSubscript(index?: number) {
-            return index !== undefined
-                ? {
-                      subscript: this.sliceFromStart ? index : index - this.counter,
-                      subscriptKind: SubscriptKind.Index,
-                  }
-                : this.counter === 0
-                ? undefined // no indicies allocated, return the whole type var tuple
-                : this.sliceFromStart
-                ? { subscript: this.counter, subscriptKind: SubscriptKind.StartSlice }
-                : { subscript: -this.counter, subscriptKind: SubscriptKind.EndSlice };
+        getSubscript(subscript: Subscript) {
+            const start = subscript.start.toTypeVarTupleIndexedVar();
+            const end = subscript.end?.toTypeVarTupleIndexedVar();
+
+            if (
+                subscript.kind === TypeVarTupleSubscriptKind.Slice &&
+                start.index === undefined &&
+                start.offset === 0 &&
+                start.total === 1 &&
+                !start.isLastIndex &&
+                !!end &&
+                end.index === 0 &&
+                end.offset === 0 &&
+                end.total === 1 &&
+                end.isLastIndex
+            ) {
+                return undefined;
+            }
+
+            return {
+                base: this.typeVarTuple,
+                kind: subscript.kind,
+                start,
+                end,
+            };
         }
     }
 
@@ -613,15 +672,15 @@ function allocateSourceTypeVarTuples(matchedTypeArgs: { destSequence: TupleTypeA
                             tracker = new TypeVarTupleIndexTracker(srcArg.type);
                             srcTypeVarTupleTrackers.set(srcArg.type.shared.name, tracker);
                         }
-                        if (
-                            destSequence.length === 0 ||
-                            isTypeVarTuple(destSequence[destSequence.length === 1 ? 0 : i].type)
-                        ) {
-                            tracker.allocateSlice();
-                            return { srcArg, typeVarTuple: srcArg.type };
-                        } else {
-                            return { srcArg, typeVarTuple: srcArg.type, index: tracker.allocateIndex() };
-                        }
+                        return {
+                            srcArg,
+                            typeVarTuple: srcArg.type,
+                            subscript:
+                                destSequence.length === 0 ||
+                                isTypeVarTuple(destSequence[destSequence.length === 1 ? 0 : i].type)
+                                    ? tracker.allocateSlice()
+                                    : tracker.allocateIndex(),
+                        };
                     } else {
                         return { srcArg };
                     }
@@ -639,13 +698,9 @@ function allocateSourceTypeVarTuples(matchedTypeArgs: { destSequence: TupleTypeA
                         const tracker =
                             srcTypeVarTupleTrackers.get(srcArg.typeVarTuple.shared.name) ??
                             new TypeVarTupleIndexTracker(srcArg.typeVarTuple);
-                        const subscript = tracker.getSubscript(srcArg.index);
+                        const subscript = tracker.getSubscript(srcArg.subscript);
                         const indexedTypeVarTuple = subscript
-                            ? TypeVarType.cloneAsSubscripted(
-                                  srcArg.typeVarTuple,
-                                  subscript.subscript,
-                                  subscript.subscriptKind
-                              )
+                            ? TypeVarType.cloneAsSubscripted(srcArg.typeVarTuple, subscript)
                             : TypeBase.cloneType(srcArg.typeVarTuple);
                         if (isTypeVarTuple(indexedTypeVarTuple)) {
                             indexedTypeVarTuple.priv.isUnpacked = true;
@@ -675,29 +730,12 @@ function combineSubscriptedTypeVars(args: TupleTypeArg[]) {
     }
 
     const isSubscriptOfTheSameTypeVar = (
-        confirmedSubscript: TypeVarSubcript,
-        subjectSubscript: TypeVarSubcript | undefined
-    ): subjectSubscript is TypeVarSubcript =>
+        confirmedSubscript: TypeVarTupleSubscript,
+        subjectSubscript: TypeVarTupleSubscript | undefined
+    ): subjectSubscript is TypeVarTupleSubscript =>
         !!subjectSubscript && isTypeVarSame(confirmedSubscript.base, subjectSubscript.base);
 
-    const areAdjacent = (prevSubscript: TypeVarSubcript, currentSubscript: TypeVarSubcript): boolean =>
-        (currentSubscript.kind === SubscriptKind.Index &&
-            prevSubscript.kind === SubscriptKind.Index &&
-            currentSubscript.index === prevSubscript.index + 1) ||
-        (currentSubscript.kind === SubscriptKind.Index &&
-            prevSubscript.kind === SubscriptKind.EndSlice &&
-            currentSubscript.index === prevSubscript.index) ||
-        (currentSubscript.kind === SubscriptKind.StartSlice &&
-            prevSubscript.kind === SubscriptKind.Index &&
-            currentSubscript.index === prevSubscript.index + 1);
-
-    const isValidEnd = (subscript: TypeVarSubcript): boolean =>
-        (subscript.kind === SubscriptKind.Index && subscript.index < 0) || subscript.kind === SubscriptKind.StartSlice;
-
-    const isValidStart = (subscript: TypeVarSubcript): boolean =>
-        (subscript.kind === SubscriptKind.Index && subscript.index === 0) || subscript.kind === SubscriptKind.EndSlice;
-
-    let prevSubscript: TypeVarSubcript | undefined;
+    let prevSubscript: TypeVarTupleSubscript | undefined;
     let startIndex: number | undefined = undefined;
     let isUnbounded: boolean = false;
     let isOptional: boolean | undefined = undefined;
@@ -709,7 +747,7 @@ function combineSubscriptedTypeVars(args: TupleTypeArg[]) {
 
         if (!!prevSubscript && isSubscriptOfTheSameTypeVar(prevSubscript, currentSubscript)) {
             // continue or break
-            if (areAdjacent(prevSubscript, currentSubscript)) {
+            if (TypeVarTupleSubscript.areAdjacent(prevSubscript, currentSubscript)) {
                 prevSubscript = currentSubscript;
             } else {
                 startIndex = undefined;
@@ -725,7 +763,7 @@ function combineSubscriptedTypeVars(args: TupleTypeArg[]) {
             !isSubscriptOfTheSameTypeVar(prevSubscript, currentSubscript)
         ) {
             // end
-            if (isValidEnd(prevSubscript)) {
+            if (TypeVarTupleSubscript.isValidEnd(prevSubscript)) {
                 const baseArg = {
                     type: prevSubscript.base,
                     isUnbounded,
@@ -737,7 +775,7 @@ function combineSubscriptedTypeVars(args: TupleTypeArg[]) {
             prevSubscript = undefined;
         } else if (!!currentSubscript && !isSubscriptOfTheSameTypeVar(currentSubscript, prevSubscript)) {
             // start
-            if (isValidStart(currentSubscript)) {
+            if (TypeVarTupleSubscript.isValidStart(currentSubscript)) {
                 startIndex = i;
                 prevSubscript = currentSubscript;
             }

@@ -2802,16 +2802,93 @@ export enum TypeVarKind {
     ParamSpec,
 }
 
-export enum SubscriptKind {
-    Index,
-    StartSlice,
-    EndSlice,
+export interface TypeVarTulpeIndexedVar {
+    index: number | undefined;
+    offset: number;
+    total: number;
+    isLastIndex: boolean; // last index but might not last offset
 }
 
-export interface TypeVarSubcript {
+export namespace TypeVarTulpeIndexedVar {
+    export function isFirst(indexedVar: TypeVarTulpeIndexedVar) {
+        return indexedVar.index === undefined && indexedVar.offset === 0;
+    }
+
+    export function isLast(indexedVar: TypeVarTulpeIndexedVar) {
+        return indexedVar.isLastIndex && indexedVar.offset === indexedVar.total - 1;
+    }
+
+    export function areAdjacent(indexedVar: TypeVarTulpeIndexedVar, nextIndexedVar: TypeVarTulpeIndexedVar): boolean {
+        // if they are the same variable, offsests should be adjacent
+        // e.g. (i0 + 1) and (i0 + 2)
+        if (indexedVar.index === nextIndexedVar.index) {
+            return indexedVar.offset === nextIndexedVar.offset - 1;
+        }
+        // o.w. variables should be adjacent (e.g. i0 and i1, or undefined and i0)
+        // and offset of the first variable should indicate the last use of that variable
+        // and offset of the next variable should indicate the first use of that variable
+        return (
+            (indexedVar.index ?? -1) === (nextIndexedVar.index ?? -1) - 1 &&
+            indexedVar.offset === indexedVar.offset - 1 &&
+            nextIndexedVar.offset === 0
+        );
+    }
+
+    export function toString(indexedVar: TypeVarTulpeIndexedVar) {
+        if (indexedVar.index === undefined) {
+            return indexedVar.offset.toString();
+        }
+
+        if (indexedVar.isLastIndex) {
+            return (indexedVar.offset - indexedVar.total).toString();
+        }
+
+        return `i${indexedVar.index}${
+            indexedVar.offset === 0 ? '' : indexedVar.offset > 0 ? ` + ${indexedVar.offset}` : ` - ${indexedVar.offset}`
+        }`;
+    }
+}
+
+export enum TypeVarTupleSubscriptKind {
+    Index,
+    Slice,
+}
+
+export interface TypeVarTupleSubscript {
     base: TypeVarTupleType;
-    kind: SubscriptKind;
-    index: number;
+    kind: TypeVarTupleSubscriptKind;
+    start: TypeVarTulpeIndexedVar;
+    end?: TypeVarTulpeIndexedVar;
+}
+
+export namespace TypeVarTupleSubscript {
+    export function areAdjacent(subscript: TypeVarTupleSubscript, nextSubscript: TypeVarTupleSubscript): boolean {
+        return TypeVarTulpeIndexedVar.areAdjacent(subscript.end ?? subscript.start, nextSubscript.start);
+    }
+
+    export function isValidEnd(subscript: TypeVarTupleSubscript): boolean {
+        return TypeVarTulpeIndexedVar.isLast(subscript.end ?? subscript.start);
+    }
+
+    export function isValidStart(subscript: TypeVarTupleSubscript): boolean {
+        return TypeVarTulpeIndexedVar.isFirst(subscript.start);
+    }
+
+    export function toString(subsript: TypeVarTupleSubscript) {
+        switch (subsript.kind) {
+            case TypeVarTupleSubscriptKind.Index:
+                return `[${TypeVarTulpeIndexedVar.toString(subsript.start)}]`;
+
+            case TypeVarTupleSubscriptKind.Slice:
+                return `[${
+                    TypeVarTulpeIndexedVar.isFirst(subsript.start)
+                        ? ''
+                        : TypeVarTulpeIndexedVar.toString(subsript.start)
+                }:${
+                    TypeVarTulpeIndexedVar.isLast(subsript.end!) ? '' : TypeVarTulpeIndexedVar.toString(subsript.end!)
+                }]`;
+        }
+    }
 }
 
 export interface TypeVarDetailsShared {
@@ -2825,7 +2902,7 @@ export interface TypeVarDetailsShared {
 
     declaredVariance: Variance;
 
-    subscript?: TypeVarSubcript;
+    subscript?: TypeVarTupleSubscript;
 
     // Internally created (e.g. for pseudo-generic classes)
     isSynthesized: boolean;
@@ -2983,23 +3060,9 @@ export namespace TypeVarType {
         return newInstance;
     }
 
-    export function cloneAsSubscripted(type: TypeVarTupleType, index: number, kind: SubscriptKind): TypeVarType {
-        let subscriptString: string = '';
-        switch (kind) {
-            case SubscriptKind.Index:
-                subscriptString = `[${index}]`;
-                break;
-
-            case SubscriptKind.StartSlice:
-                subscriptString = `[${index}:]`;
-                break;
-
-            case SubscriptKind.EndSlice:
-                subscriptString = `[:${index}]`;
-                break;
-        }
-        const newInstance = cloneForNewName(type, `${type.shared.name}${subscriptString}`);
-        if (kind === SubscriptKind.Index) {
+    export function cloneAsSubscripted(type: TypeVarTupleType, subscript: TypeVarTupleSubscript): TypeVarType {
+        const newInstance = cloneForNewName(type, `${type.shared.name}${TypeVarTupleSubscript.toString(subscript)}`);
+        if (subscript.kind === TypeVarTupleSubscriptKind.Index) {
             newInstance.shared.kind = TypeVarKind.TypeVar;
             function combineVariadicBounds(boundType: Type | undefined, set: (combined: Type) => void) {
                 if (!!boundType && isClass(boundType) && isTupleClass(boundType)) {
@@ -3015,13 +3078,13 @@ export namespace TypeVarType {
                 (combined) => (newInstance.shared.mappedBoundType = combined)
             );
         }
-        newInstance.shared.subscript = { base: type, kind, index };
+        newInstance.shared.subscript = { ...subscript, base: type };
         if (
             newInstance.priv.freeTypeVar &&
             isTypeVarTuple(newInstance.priv.freeTypeVar) &&
             !newInstance.priv.freeTypeVar.shared.subscript
         ) {
-            newInstance.priv.freeTypeVar = cloneAsSubscripted(newInstance.priv.freeTypeVar, index, kind);
+            newInstance.priv.freeTypeVar = cloneAsSubscripted(newInstance.priv.freeTypeVar, subscript);
         }
         return newInstance;
     }
