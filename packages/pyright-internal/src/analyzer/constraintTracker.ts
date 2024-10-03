@@ -191,7 +191,7 @@ export class ConstraintSet {
                 for (const key of set._typeVarMap.keys()) {
                     allKeys.add(key);
                 }
-                set._scopeIds?.forEach(result.addScopeId);
+                set._scopeIds?.forEach((scopeId) => result.addScopeId(scopeId));
             });
             for (const key of allKeys) {
                 let typeVar: TypeVarType | undefined = undefined;
@@ -360,6 +360,9 @@ export class ConstraintTracker {
                 if (combinedSet) {
                     result._constraintSets.push(combinedSet);
                 }
+            }
+            if (result._constraintSets.length === 0) {
+                result._constraintSets = [new ConstraintSet()];
             }
             return result;
         } else if (allConstraints.length === 1) {
