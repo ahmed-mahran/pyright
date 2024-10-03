@@ -122,7 +122,7 @@ export function assignTypeVar(
     }
 
     if (TypeVarType.isBound(destType) && !TypeVarType.isUnification(destType)) {
-        return assignBoundTypeVar(evaluator, destType, srcType, diag, flags);
+        return assignBoundTypeVar(evaluator, destType, srcType, diag, flags, recursionCount);
     }
 
     // Handle type[T] as a dest and a special form as a source.
@@ -605,7 +605,8 @@ function assignBoundTypeVar(
     destType: TypeVarType,
     srcType: Type,
     diag: DiagnosticAddendum | undefined,
-    flags: AssignTypeFlags
+    flags: AssignTypeFlags,
+    recursionCount = 0
 ) {
     // Handle Any as a source.
     if (isAnyOrUnknown(srcType) || (isClass(srcType) && ClassType.derivesFromAnyOrUnknown(srcType))) {
@@ -630,6 +631,20 @@ function assignBoundTypeVar(
                 return true;
             }
         }
+    }
+
+    if (
+        !!destType.priv.freeTypeVar &&
+        evaluator.assignType(
+            destType.priv.freeTypeVar,
+            srcType,
+            diag,
+            /* constraints */ undefined,
+            flags,
+            recursionCount
+        )
+    ) {
+        return true;
     }
 
     // Emit an error unless this is a synthesized type variable used
