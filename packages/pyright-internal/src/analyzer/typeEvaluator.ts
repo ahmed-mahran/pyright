@@ -5680,7 +5680,8 @@ export function createTypeEvaluator(
         node: MemberAccessNode,
         baseTypeResult: TypeResult,
         usage: EvaluatorUsage,
-        flags: EvalFlags
+        flags: EvalFlags,
+        recursiveCount: number = 0
     ): TypeResult {
         let baseType = transformPossibleRecursiveTypeAlias(evaluatorInterface, baseTypeResult.type);
         const memberName = node.d.member.d.value;
@@ -5793,7 +5794,8 @@ export function createTypeEvaluator(
                         isIncomplete,
                     },
                     usage,
-                    EvalFlags.None
+                    EvalFlags.None,
+                    recursiveCount + 1
                 );
             }
 
@@ -6014,7 +6016,8 @@ export function createTypeEvaluator(
                             isIncomplete: baseTypeResult.isIncomplete,
                         },
                         usage,
-                        EvalFlags.None
+                        EvalFlags.None,
+                        recursiveCount + 1
                     );
 
                     if (typeResult.isIncomplete) {
@@ -6057,12 +6060,13 @@ export function createTypeEvaluator(
                         (callableType.priv.preBoundFlags & FunctionTypeFlags.StaticMethod) === 0
                     ) {
                         type = callableType.priv.boundToType;
-                    } else {
+                    } else if (callableType && isClass(callableType)) {
                         type = getTypeOfMemberAccessWithBaseType(
                             node,
                             { type: callableType ?? UnknownType.create() },
                             usage,
-                            flags
+                            flags,
+                            recursiveCount + 1
                         ).type;
                     }
                 } else {
@@ -6070,7 +6074,8 @@ export function createTypeEvaluator(
                         node,
                         { type: functionClass ? convertToInstance(functionClass) : UnknownType.create() },
                         usage,
-                        flags
+                        flags,
+                        recursiveCount + 1
                     ).type;
                 }
                 break;
