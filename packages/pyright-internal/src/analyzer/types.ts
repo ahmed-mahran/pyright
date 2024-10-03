@@ -128,6 +128,7 @@ export interface TypeSameOptions {
     ignoreTypedDictNarrowEntries?: boolean;
     honorTypeForm?: boolean;
     treatAnySameAsUnknown?: boolean;
+    treatBoundScopeIdForTypeVarAsUnBound?: boolean;
 }
 
 export interface TypeAliasInfo {
@@ -3222,6 +3223,17 @@ export namespace TypeVarType {
         return `${scopeId}*`;
     }
 
+    export function makeUnBoundScopeId(scopeId: TypeVarScopeId): TypeVarScopeId;
+    export function makeUnBoundScopeId(scopeId: TypeVarScopeId | undefined): TypeVarScopeId | undefined;
+    export function makeUnBoundScopeId(scopeId: TypeVarScopeId | undefined): TypeVarScopeId | undefined {
+        if (!scopeId) {
+            return undefined;
+        }
+
+        // Remove asterisk at the end to denote an unbound scope.
+        return scopeId.endsWith('*') ? scopeId.substring(0, scopeId.length - 1) : scopeId;
+    }
+
     export function cloneAsBound(type: TypeVarType): TypeVarType {
         if (type.priv.scopeId === undefined || type.priv.freeTypeVar) {
             return type;
@@ -3713,8 +3725,14 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
 
         case TypeCategory.TypeVar: {
             const type2TypeVar = type2 as TypeVarType;
+            const type1ScopeId = options.treatBoundScopeIdForTypeVarAsUnBound
+                ? TypeVarType.makeUnBoundScopeId(type1.priv.scopeId)
+                : type1.priv.scopeId;
+            const type2ScopeId = options.treatBoundScopeIdForTypeVarAsUnBound
+                ? TypeVarType.makeUnBoundScopeId(type2TypeVar.priv.scopeId)
+                : type2TypeVar.priv.scopeId;
 
-            if (type1.priv.scopeId !== type2TypeVar.priv.scopeId) {
+            if (type1ScopeId !== type2ScopeId) {
                 return false;
             }
 
@@ -3758,7 +3776,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
                 type1.shared.name !== type2TypeVar.shared.name ||
                 type1.shared.isSynthesized !== type2TypeVar.shared.isSynthesized ||
                 type1.shared.declaredVariance !== type2TypeVar.shared.declaredVariance ||
-                type1.priv.scopeId !== type2TypeVar.priv.scopeId
+                type1ScopeId !== type2ScopeId
             ) {
                 return false;
             }

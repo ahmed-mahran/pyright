@@ -26,6 +26,7 @@ import {
     isClass,
     isClassInstance,
     isInstantiableClass,
+    isTypeSame,
     isTypeVar,
     isTypeVarTuple,
     isUnion,
@@ -200,6 +201,23 @@ export function assignTupleTypeArgsInternal(
 
     const destTypeArgs = combineSubscriptedTypeVars(destTupleTypeArgs);
     const srcTypeArgs = combineSubscriptedTypeVars(srcTupleTypeArgs);
+
+    // Handle special case when dest and src are exactly the same
+    if (destTypeArgs.length === srcTypeArgs.length) {
+        let isTheSame = true;
+        for (let i = 0; i < destTypeArgs.length; i++) {
+            if (
+                !isTypeSame(destTypeArgs[i].type, srcTypeArgs[i].type, { treatBoundScopeIdForTypeVarAsUnBound: true })
+            ) {
+                isTheSame = false;
+                break;
+            }
+        }
+        if (isTheSame) {
+            return true;
+        }
+    }
+
     const destTypeArgsBaseCase = getBaseCase(destTypeArgs);
     const srcTypeArgsBaseCase = getBaseCase(srcTypeArgs);
 
