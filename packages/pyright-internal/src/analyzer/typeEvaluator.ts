@@ -23734,14 +23734,7 @@ export function createTypeEvaluator(
         ) {
             const originalFunction = CallableType.getUndecoratedType(selfClass);
             if (isFunction(originalFunction)) {
-                const tpParamType = FunctionType.getParamType(
-                    originalFunction,
-                    FunctionType.isStaticMethod(originalFunction) ||
-                        !originalFunction.shared.methodClass ||
-                        !!originalFunction.priv.strippedFirstParamType
-                        ? 0
-                        : 1
-                );
+                const tpParamType = FunctionType.getNotSelfOrClassFirstParamType(originalFunction);
                 type.priv.specializedTypes.parameterTypes[1] = TypeBase.cloneType(tpParamType);
             }
         }
