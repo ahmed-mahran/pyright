@@ -24455,7 +24455,7 @@ export function createTypeEvaluator(
 
         if (MyPyrightExtensions.isMappedType(destType) || MyPyrightExtensions.isMappedType(srcType)) {
             const mapSpecs = MyPyrightExtensions.deconstructMutualMappedTypes(evaluatorInterface, destType, srcType);
-            return (
+            if (
                 !!mapSpecs &&
                 ((mapSpecs.destMapSpec.arg === undefined && mapSpecs.srcMapSpec.arg === undefined) ||
                     (!!mapSpecs.destMapSpec.arg &&
@@ -24468,7 +24468,40 @@ export function createTypeEvaluator(
                             flags,
                             recursionCount
                         )))
-            );
+            ) {
+                if (constraints) {
+                    // We need to verify that the original unmapped assignment is valid.
+                    // Consider this assignment: type[T] <== tuple[type[A], type[B]],
+                    // map = type and we resolve to the assignment T <== tuple[A, B].
+                    // If we substitute T back in the original assignment, we find that
+                    // it is not valid: type[tuple[A, B]] !== tuple[type[A], type[B]].
+                    // type doesn't commute with tuple. Also, map function might be
+                    // invariant in its argument such that if T1 is assignable to T2,
+                    // then F[T1] is not assignable to F[T2].
+                    function cloneUnsetFlagMappedIfMapped(type: Type) {
+                        return MyPyrightExtensions.isMappedType(type)
+                            ? MyPyrightExtensions.unsetFlagMapped(TypeBase.cloneType(type))
+                            : type;
+                    }
+                    const isContra = (flags & AssignTypeFlags.Contravariant) !== 0;
+                    if (hasTypeVar(isContra ? srcType : destType)) {
+                        const solvedType = solveAndApplyConstraints(isContra ? srcType : destType, constraints);
+                        if (!isTypeSame(solvedType, destType)) {
+                            return assignType(
+                                cloneUnsetFlagMappedIfMapped(isContra ? destType : solvedType),
+                                cloneUnsetFlagMappedIfMapped(isContra ? solvedType : srcType),
+                                diag,
+                                constraints?.clone(),
+                                flags,
+                                recursionCount
+                            );
+                        }
+                    }
+                }
+
+                return true;
+            }
+            return false;
         }
 
         // If the source and dest refer to the recursive type aliases, handle
