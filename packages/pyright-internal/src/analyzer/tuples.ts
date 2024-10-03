@@ -14,7 +14,7 @@ import { ExpressionNode, SliceNode } from '../parser/parseNodes';
 import { assignTypeVar as doAssignTypeVar } from './constraintSolver';
 import { ConstraintTracker } from './constraintTracker';
 import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
-import { matchAccumulateSequence } from './sequenceMatching';
+import { DestItemMatches, matchAccumulateSequence } from './sequenceMatching';
 import { AssignTypeFlags, TypeEvaluator } from './typeEvaluatorTypes';
 import {
     AnyType,
@@ -318,16 +318,16 @@ export function assignTupleTypeArgsInternal(
                 }
                 return undefined;
             };
-            allocateSourceTypeVarTuples(matchedTypeArgs).forEach(({ destSequence, srcSequence }) => {
-                if (isSingleTypeVarTuple(destSequence)) {
+            allocateSourceTypeVarTuples(matchedTypeArgs).forEach(({ destArg, srcSequence }) => {
+                if (isTypeVarTuple(destArg.type)) {
                     assignTypeVar(
-                        destSequence[0].type as TypeVarType,
+                        destArg.type,
                         isSingleTypeVarTuple(srcSequence)
                             ? srcSequence[0].type
                             : createVariadicTuple(evaluator, srcSequence)
                     );
-                } else if (destSequence.length === srcSequence.length) {
-                    destSequence.forEach((destArg, i) => resolveTypeVars(destArg.type, srcSequence[i].type));
+                } else if (srcSequence.length === 1) {
+                    resolveTypeVars(destArg.type, srcSequence[0].type);
                 }
             });
         }
@@ -472,7 +472,7 @@ export function matchTupleTypeArgs(
 
     const toStr = function (type: TupleTypeArg | undefined): string {
         return type !== undefined
-            ? `${evaluator.printType(type.type)}${isIndeterminate(type) ? '*' : ''}${
+            ? `${evaluator.printType(type.type)}${
                   isTypeVar(type.type) ? `${MyPyrightExtensions.printTypeVarBound(evaluator, type.type)}` : ''
               }`
             : 'undefined';
@@ -551,11 +551,25 @@ export function matchTupleTypeArgs(
     // if (!wasLocked) {
     //     constraints?.lock();
     // }
+    function toSequenceItem(arg: TupleTypeArg) {
+        if (isTypeVar(arg.type) && !!arg.type.priv.subscript) {
+            return {
+                item: arg,
+                minMatches: 0,
+                maxMatches: TypeVarTupleSubscript.length(arg.type.priv.subscript),
+            };
+        }
+        const indeterminate = isIndeterminate(arg);
+        return {
+            item: arg,
+            minMatches: indeterminate ? 0 : 1,
+            maxMatches: indeterminate ? undefined : 1,
+        };
+    }
+
     const matchedTypeArgs = matchAccumulateSequence<TupleTypeArg, TupleTypeArg>(
-        destTypeArgs,
-        srcTypeArgs,
-        isIndeterminate,
-        isIndeterminate,
+        destTypeArgs.map(toSequenceItem),
+        srcTypeArgs.map(toSequenceItem),
         matches,
         toStr,
         toStr,
@@ -581,7 +595,7 @@ export function matchTupleTypeArgs(
 // of that type var tuple. If a dest type var tuple matches a type var tuple, it is assigned what is left
 // of that type var tuple. The function keeps track of how many times a source type var tuple is being
 // assigned to singular dest types and reflects that subscripted source type var tuple.
-function allocateSourceTypeVarTuples(matchedTypeArgs: { destSequence: TupleTypeArg[]; srcSequence: TupleTypeArg[] }[]) {
+function allocateSourceTypeVarTuples(matchedTypeArgs: DestItemMatches<TupleTypeArg, TupleTypeArg>[]) {
     interface IndexedVarAcc {
         index: number | undefined;
         total: number;
@@ -669,7 +683,7 @@ function allocateSourceTypeVarTuples(matchedTypeArgs: { destSequence: TupleTypeA
             }
 
             return {
-                base: this.typeVarTuple,
+                base: TypeBase.cloneType(this.typeVarTuple),
                 kind: subscript.kind,
                 start,
                 end,
@@ -682,8 +696,10 @@ function allocateSourceTypeVarTuples(matchedTypeArgs: { destSequence: TupleTypeA
     return (
         matchedTypeArgs
             // First pass, allocate indicies and slices from source type var tuples
-            .map(({ destSequence, srcSequence }) => {
-                const mappedSrcSequence = srcSequence.map((srcArg, i) => {
+            .map(({ destItem, matchedSrcItems }) => {
+                const destArg = destItem.item;
+                const mappedSrcSequence = matchedSrcItems.map((srcItem, i) => {
+                    const srcArg = srcItem.item;
                     if (isTypeVarTuple(srcArg.type)) {
                         let tracker = srcTypeVarTupleTrackers.get(srcArg.type.shared.name);
                         if (!tracker) {
@@ -693,24 +709,20 @@ function allocateSourceTypeVarTuples(matchedTypeArgs: { destSequence: TupleTypeA
                         return {
                             srcArg,
                             typeVarTuple: srcArg.type,
-                            subscript:
-                                destSequence.length === 0 ||
-                                isTypeVarTuple(destSequence[destSequence.length === 1 ? 0 : i].type)
-                                    ? tracker.allocateSlice()
-                                    : tracker.allocateIndex(),
+                            subscript: isTypeVarTuple(destArg.type) ? tracker.allocateSlice() : tracker.allocateIndex(),
                         };
                     } else {
                         return { srcArg };
                     }
                 });
-                return { destSequence, srcSequence: mappedSrcSequence };
+                return { destArg, srcSequence: mappedSrcSequence };
             })
             // Second pass, convert allocated indicies and slices to concrete subscripted
             // type var tuples. The reason we need a second pass is that, if a source
             // type var tuple matches a type var tuple first, we don't know in advance
             // whether or not we should allocate a slice, and if so we don't know what slice
             // to allocate. This is because we don't know how many singular types it will match later.
-            .map(({ destSequence, srcSequence }) => {
+            .map(({ destArg, srcSequence }) => {
                 const mappedSrcSequence = srcSequence.map((srcArg) => {
                     if (srcArg.typeVarTuple) {
                         const tracker =
@@ -731,7 +743,7 @@ function allocateSourceTypeVarTuples(matchedTypeArgs: { destSequence: TupleTypeA
                         return srcArg.srcArg;
                     }
                 });
-                return { destSequence, srcSequence: mappedSrcSequence };
+                return { destArg, srcSequence: mappedSrcSequence };
             })
     );
 }
@@ -761,7 +773,7 @@ function combineSubscriptedTypeVars(args: TupleTypeArg[]) {
     while (i <= args.length) {
         const currentArg: TupleTypeArg | undefined = i < args.length ? args[i] : undefined;
         const currentSubscript =
-            currentArg?.type && isTypeVar(currentArg.type) ? currentArg.type.shared.subscript : undefined;
+            currentArg?.type && isTypeVar(currentArg.type) ? currentArg.type.priv.subscript : undefined;
 
         if (!!prevSubscript && isSubscriptOfTheSameTypeVar(prevSubscript, currentSubscript)) {
             // continue or break

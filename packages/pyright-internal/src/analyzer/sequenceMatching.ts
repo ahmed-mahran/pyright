@@ -6,15 +6,92 @@
  * Provides generic logic for matching two sequences and associating corresponding elements.
  */
 
+export interface SequenceItem<Item> {
+    item: Item;
+    minMatches: number;
+    maxMatches?: number;
+}
+
+export namespace SequenceItem {
+    export function isRepeated<T>(item: SequenceItem<T>) {
+        return item.maxMatches === undefined || item.maxMatches > 1 || (item.maxMatches === 1 && item.minMatches === 0);
+    }
+}
+
+export class SequenceItemMatchTracker<Item> {
+    sequenceItem: SequenceItem<Item>;
+    matchesCounter: number = 0;
+
+    constructor(sequenceItem: SequenceItem<Item>, matchesCounter: number = 0) {
+        this.sequenceItem = sequenceItem;
+        this.matchesCounter = matchesCounter;
+    }
+
+    hasMoreMatches(): boolean {
+        return !this.sequenceItem.maxMatches || this.matchesCounter < this.sequenceItem.maxMatches;
+    }
+
+    matched(): SequenceItemMatchTracker<Item> {
+        return new SequenceItemMatchTracker(this.sequenceItem, this.matchesCounter + 1);
+    }
+
+    isSkippable(): boolean {
+        return this.sequenceItem.minMatches <= 0;
+    }
+}
+
+function getItemToStringFunction<T>(toStr: (t: T | undefined) => string) {
+    return function (t: SequenceItem<T> | undefined) {
+        const tStr = toStr(t?.item);
+        if (t === undefined) {
+            return tStr;
+        }
+        const minMatches = t.minMatches;
+        const maxMatches = t.maxMatches;
+        if (minMatches === 1 && maxMatches === 1) {
+            return tStr;
+        }
+        if (minMatches === 0 && maxMatches === undefined) {
+            return `${tStr}*`;
+        }
+        if (minMatches === 1 && maxMatches === undefined) {
+            return `${tStr}+`;
+        }
+        if (minMatches === 0 && maxMatches === 1) {
+            return `${tStr}?`;
+        }
+        return `${tStr}{${minMatches}:${maxMatches ?? ''}}`;
+    };
+}
+
+function getItemTrackerToStringFunction<T>(toStr: (t: T | undefined) => string) {
+    const item_toStr = getItemToStringFunction(toStr);
+    return function (t: SequenceItemMatchTracker<T> | undefined) {
+        const tStr = item_toStr(t?.sequenceItem);
+        if (t === undefined) {
+            return tStr;
+        }
+        const maxMatches = t.sequenceItem.maxMatches;
+        const matchedStr = maxMatches !== undefined && maxMatches <= 1 ? '' : `.[${t.matchesCounter}]`;
+        return `${tStr}${matchedStr}`;
+    };
+}
+
 export interface SequenceAccumulator<DestType, SrcType, Acc> {
     get value(): Acc;
 
     // Returns false if DestType and SrcType are not reducable.
-    matches(dest: DestType | undefined, src: SrcType | undefined): boolean;
+    matches(
+        dest: SequenceItemMatchTracker<DestType> | undefined,
+        src: SequenceItemMatchTracker<SrcType> | undefined
+    ): boolean;
 
     // Reduces DestType and SrcType and accumulates result into Acc.
     // Returns a copy of this with new accumulation.
-    accumulate(dest: DestType | undefined, src: SrcType | undefined): this;
+    accumulate(
+        dest: SequenceItemMatchTracker<DestType> | undefined,
+        src: SequenceItemMatchTracker<SrcType> | undefined
+    ): this;
 
     copy(): this;
 
@@ -22,10 +99,8 @@ export interface SequenceAccumulator<DestType, SrcType, Acc> {
 }
 
 export function matchSequence<DestType, SrcType>(
-    destSequence: DestType[],
-    srcSequence: SrcType[],
-    isRepeatedDest: (dest: DestType | undefined) => boolean,
-    isRepeatedSrc: (src: SrcType | undefined) => boolean,
+    destSequence: SequenceItem<DestType>[],
+    srcSequence: SequenceItem<SrcType>[],
     destMatchesSrc: (dest: DestType, src: SrcType) => boolean,
     destStr: (dest: DestType | undefined) => string,
     srcStr: (src: SrcType | undefined) => string,
@@ -42,15 +117,28 @@ export function matchSequence<DestType, SrcType>(
             return this.acc;
         }
 
-        matches(dest: DestType | undefined, src: SrcType | undefined): boolean {
+        matches(
+            destItem: SequenceItemMatchTracker<DestType> | undefined,
+            srcItem: SequenceItemMatchTracker<SrcType> | undefined
+        ): boolean {
             return (
-                (dest !== undefined && src !== undefined && destMatchesSrc(dest, src)) ||
-                (dest === undefined && isRepeatedSrc(src)) ||
-                (isRepeatedDest(dest) && src === undefined)
+                (destItem === undefined && srcItem === undefined) ||
+                (destItem !== undefined &&
+                    srcItem !== undefined &&
+                    destItem.hasMoreMatches() &&
+                    srcItem.hasMoreMatches() &&
+                    destMatchesSrc(destItem.sequenceItem.item, srcItem.sequenceItem.item)) ||
+                // destType matches zero src
+                (destItem === undefined && srcItem !== undefined && srcItem.isSkippable()) ||
+                // srcType matches zero dest
+                (destItem !== undefined && destItem.isSkippable() && srcItem === undefined)
             );
         }
 
-        accumulate(dest: DestType | undefined, src: SrcType | undefined): this {
+        accumulate(
+            dest: SequenceItemMatchTracker<DestType> | undefined,
+            src: SequenceItemMatchTracker<SrcType> | undefined
+        ): this {
             const copy = this.copy();
             if (this.matches(dest, src)) {
                 copy.acc = true;
@@ -70,10 +158,8 @@ export function matchSequence<DestType, SrcType>(
     }
 
     const acc = traverseAccumulateSequence(
-        destSequence,
-        srcSequence,
-        isRepeatedDest,
-        isRepeatedSrc,
+        destSequence.map((destItem) => new SequenceItemMatchTracker(destItem)),
+        srcSequence.map((srcItem) => new SequenceItemMatchTracker(srcItem)),
         new MatchSequenceAccumulator(),
         destStr,
         srcStr,
@@ -83,79 +169,84 @@ export function matchSequence<DestType, SrcType>(
     return acc?.value === true;
 }
 
+export interface DestItemMatches<DestType, SrcType> {
+    destItem: SequenceItem<DestType>;
+    matchedSrcItems: SequenceItem<SrcType>[];
+}
+
 export function matchAccumulateSequence<DestType, SrcType>(
-    destSequence: DestType[],
-    srcSequence: SrcType[],
-    isRepeatedDest: (dest: DestType | undefined) => boolean,
-    isRepeatedSrc: (src: SrcType | undefined) => boolean,
+    destSequence: SequenceItem<DestType>[],
+    srcSequence: SequenceItem<SrcType>[],
     destMatchesSrc: (dest: DestType, src: SrcType) => boolean,
     destStr: (dest: DestType | undefined) => string,
     srcStr: (src: SrcType | undefined) => string,
     recursionCount: number
-): { destSequence: DestType[]; srcSequence: SrcType[] }[] | undefined {
+): DestItemMatches<DestType, SrcType>[] | undefined {
+    const destItemStr = getItemToStringFunction(destStr);
+    const srcItemStr = getItemToStringFunction(srcStr);
+
     class MatchAccumulateSequenceAccumulator
-        implements SequenceAccumulator<DestType, SrcType, { destSequence: DestType[]; srcSequence: SrcType[] }[]>
+        implements SequenceAccumulator<DestType, SrcType, DestItemMatches<DestType, SrcType>[]>
     {
-        acc: { destSequence: DestType[]; srcSequence: SrcType[] }[];
+        acc: DestItemMatches<DestType, SrcType>[];
 
         constructor() {
             this.acc = [];
         }
 
-        get value(): { destSequence: DestType[]; srcSequence: SrcType[] }[] {
+        get value(): DestItemMatches<DestType, SrcType>[] {
             return this.acc;
         }
 
-        matches(destType: DestType | undefined, srcType: SrcType | undefined): boolean {
+        matches(
+            destItem: SequenceItemMatchTracker<DestType> | undefined,
+            srcItem: SequenceItemMatchTracker<SrcType> | undefined
+        ): boolean {
             return (
-                (destType !== undefined && srcType !== undefined && destMatchesSrc(destType, srcType)) ||
+                (destItem === undefined && srcItem === undefined) ||
+                (destItem !== undefined &&
+                    srcItem !== undefined &&
+                    destItem.hasMoreMatches() &&
+                    srcItem.hasMoreMatches() &&
+                    destMatchesSrc(destItem.sequenceItem.item, srcItem.sequenceItem.item)) ||
                 // destType matches zero src
-                (destType === undefined && isRepeatedSrc(srcType)) ||
+                (destItem === undefined && srcItem !== undefined && srcItem.isSkippable()) ||
                 // srcType matches zero dest
-                (isRepeatedDest(destType) && srcType === undefined)
+                (destItem !== undefined && destItem.isSkippable() && srcItem === undefined)
             );
         }
 
-        accumulate(destType: DestType | undefined, srcType: SrcType | undefined): this {
+        accumulate(
+            destType: SequenceItemMatchTracker<DestType> | undefined,
+            srcType: SequenceItemMatchTracker<SrcType> | undefined
+        ): this {
             const copy = this.copy();
-            if (destType !== undefined && srcType !== undefined && destMatchesSrc(destType, srcType)) {
+
+            if (destType !== undefined && srcType !== undefined) {
                 copy._withLastAcc(
                     (/* onEmpty */) => {
-                        copy.acc.push({ destSequence: [destType], srcSequence: [srcType] });
+                        copy.acc.push({ destItem: destType.sequenceItem, matchedSrcItems: [srcType.sequenceItem] });
                     },
                     (lastAcc) => {
-                        const lastDestType = lastAcc.destSequence[lastAcc.destSequence.length - 1];
-                        if ((isRepeatedDest(destType) || isRepeatedDest(lastDestType)) && destType !== lastDestType) {
-                            copy.acc.push({ destSequence: [destType], srcSequence: [srcType] });
+                        if (destType.sequenceItem === lastAcc.destItem) {
+                            lastAcc.matchedSrcItems.push(srcType.sequenceItem);
                         } else {
-                            function push<T>(t: T, ts: T[], isRepeated: (t: T | undefined) => boolean) {
-                                if (
-                                    ts.length === 0 ||
-                                    !isRepeated(t) ||
-                                    !isRepeated(ts[ts.length - 1]) ||
-                                    ts[ts.length - 1] !== t
-                                ) {
-                                    ts.push(t);
-                                }
-                            }
-                            push(destType, lastAcc.destSequence, isRepeatedDest);
-                            lastAcc.srcSequence.push(srcType);
+                            copy.acc.push({ destItem: destType.sequenceItem, matchedSrcItems: [srcType.sequenceItem] });
                         }
                     }
                 );
-            } else if (destType === undefined && srcType !== undefined && isRepeatedSrc(srcType)) {
+            } else if (destType === undefined && srcType !== undefined) {
                 // srcType matches zero dest
                 // do nothing
-            } else if (destType !== undefined && isRepeatedDest(destType) && srcType === undefined) {
+            } else if (destType !== undefined && srcType === undefined) {
                 // destType matches zero src
                 copy._withLastAcc(
                     (/* onEmpty */) => {
-                        copy.acc.push({ destSequence: [destType], srcSequence: [] });
+                        copy.acc.push({ destItem: destType.sequenceItem, matchedSrcItems: [] });
                     },
                     (lastAcc) => {
-                        const lastDestType = lastAcc.destSequence[lastAcc.destSequence.length - 1];
-                        if (destType !== lastDestType) {
-                            copy.acc.push({ destSequence: [destType], srcSequence: [] });
+                        if (destType.sequenceItem !== lastAcc.destItem) {
+                            copy.acc.push({ destItem: destType.sequenceItem, matchedSrcItems: [] });
                         }
                     }
                 );
@@ -167,25 +258,19 @@ export function matchAccumulateSequence<DestType, SrcType>(
         copy(): this {
             const cp = new MatchAccumulateSequenceAccumulator();
             cp.acc = this.acc.map((acc) => ({
-                destSequence: [...acc.destSequence],
-                srcSequence: [...acc.srcSequence],
+                destItem: acc.destItem,
+                matchedSrcItems: [...acc.matchedSrcItems],
             }));
             return cp as this;
         }
 
         toString(): string {
             return `{${this.acc
-                .map(
-                    (acc) =>
-                        `[${acc.destSequence.map(destStr).join(';')}] == [${acc.srcSequence.map(srcStr).join(';')}]`
-                )
+                .map((acc) => `${destItemStr(acc.destItem)} == [${acc.matchedSrcItems.map(srcItemStr).join(';')}]`)
                 .join(';')}}`;
         }
 
-        private _withLastAcc<R>(
-            onEmpty: () => R,
-            withLast: (last: { destSequence: DestType[]; srcSequence: SrcType[] }) => R
-        ) {
+        private _withLastAcc<R>(onEmpty: () => R, withLast: (last: DestItemMatches<DestType, SrcType>) => R) {
             if (this.acc.length === 0) {
                 return onEmpty();
             } else {
@@ -195,10 +280,8 @@ export function matchAccumulateSequence<DestType, SrcType>(
     }
 
     const acc = traverseAccumulateSequence(
-        destSequence,
-        srcSequence,
-        isRepeatedDest,
-        isRepeatedSrc,
+        destSequence.map((destItem) => new SequenceItemMatchTracker(destItem)),
+        srcSequence.map((srcItem) => new SequenceItemMatchTracker(srcItem)),
         new MatchAccumulateSequenceAccumulator(),
         destStr,
         srcStr,
@@ -209,40 +292,47 @@ export function matchAccumulateSequence<DestType, SrcType>(
 }
 
 export function getCommonSequence<DestType, SrcType, CommonType>(
-    destSequence: DestType[],
-    srcSequence: SrcType[],
-    isRepeatedDest: (dest: DestType | undefined) => boolean,
-    isRepeatedSrc: (src: SrcType | undefined) => boolean,
-    isRepeatedCommon: (common: CommonType | undefined) => boolean,
-    getCommon: (dest: DestType | undefined, src: SrcType | undefined) => CommonType | undefined,
+    destSequence: SequenceItem<DestType>[],
+    srcSequence: SequenceItem<SrcType>[],
+    getCommon: (
+        dest: SequenceItem<DestType> | undefined,
+        src: SequenceItem<SrcType> | undefined
+    ) => SequenceItem<CommonType> | undefined,
     destStr: (dest: DestType | undefined) => string,
     srcStr: (src: SrcType | undefined) => string,
     commonStr: (common: CommonType | undefined) => string,
     recursionCount: number
-): CommonType[] | undefined {
-    class CommonSequenceAccumulator implements SequenceAccumulator<DestType, SrcType, CommonType[]> {
-        acc: CommonType[];
+): SequenceItem<CommonType>[] | undefined {
+    const commonItemStr = getItemToStringFunction(commonStr);
+    class CommonSequenceAccumulator implements SequenceAccumulator<DestType, SrcType, SequenceItem<CommonType>[]> {
+        acc: SequenceItem<CommonType>[];
 
         constructor() {
             this.acc = [];
         }
 
-        get value(): CommonType[] {
+        get value(): SequenceItem<CommonType>[] {
             return this.acc;
         }
 
-        matches(dest: DestType | undefined, src: SrcType | undefined): boolean {
-            return getCommon(dest, src) !== undefined;
+        matches(
+            dest: SequenceItemMatchTracker<DestType> | undefined,
+            src: SequenceItemMatchTracker<SrcType> | undefined
+        ): boolean {
+            return getCommon(dest?.sequenceItem, src?.sequenceItem) !== undefined;
         }
 
-        accumulate(dest: DestType | undefined, src: SrcType | undefined): this {
+        accumulate(
+            dest: SequenceItemMatchTracker<DestType> | undefined,
+            src: SequenceItemMatchTracker<SrcType> | undefined
+        ): this {
             const copy = this.copy();
-            const common = getCommon(dest, src);
+            const common = getCommon(dest?.sequenceItem, src?.sequenceItem);
             if (
                 common !== undefined &&
                 (copy.acc.length === 0 ||
-                    !isRepeatedCommon(common) ||
-                    !isRepeatedCommon(copy.acc[this.acc.length - 1]) ||
+                    !SequenceItem.isRepeated(common) ||
+                    !SequenceItem.isRepeated(copy.acc[this.acc.length - 1]) ||
                     copy.acc[copy.acc.length - 1] !== common)
             ) {
                 copy.acc.push(common);
@@ -257,15 +347,13 @@ export function getCommonSequence<DestType, SrcType, CommonType>(
         }
 
         toString(): string {
-            return `[${this.acc.map(commonStr).join(';')}]`;
+            return `[${this.acc.map(commonItemStr).join(';')}]`;
         }
     }
 
     const acc = traverseAccumulateSequence(
-        destSequence,
-        srcSequence,
-        isRepeatedDest,
-        isRepeatedSrc,
+        destSequence.map((destItem) => new SequenceItemMatchTracker(destItem)),
+        srcSequence.map((srcItem) => new SequenceItemMatchTracker(srcItem)),
         new CommonSequenceAccumulator(),
         destStr,
         srcStr,
@@ -337,10 +425,8 @@ export function getCommonSequence<DestType, SrcType, CommonType>(
 //   \......../
 //       _S
 export function traverseAccumulateSequence<A, B, Acc>(
-    a_sequence: A[],
-    b_sequence: B[],
-    is_repeated_a: (a: A | undefined) => boolean,
-    is_repeated_b: (b: B | undefined) => boolean,
+    a_sequence: SequenceItemMatchTracker<A>[],
+    b_sequence: SequenceItemMatchTracker<B>[],
     acc: SequenceAccumulator<A, B, Acc>,
     a_str: (a: A | undefined) => string,
     b_str: (b: B | undefined) => string,
@@ -367,36 +453,34 @@ export function traverseAccumulateSequence<A, B, Acc>(
         return;
     };
 
-    baseline('', `[${a_sequence.map(a_str).join(';')}] ==?== [${b_sequence.map(b_str).join(';')}]`);
+    const aa_str = getItemTrackerToStringFunction(a_str);
+    const bb_str = getItemTrackerToStringFunction(b_str);
+
+    baseline('', `[${a_sequence.map(aa_str).join(';')}] ==?== [${b_sequence.map(bb_str).join(';')}]`);
 
     const step = function (
         i: number,
         j: number,
+        a_i: SequenceItemMatchTracker<A> | undefined,
+        b_j: SequenceItemMatchTracker<B> | undefined,
         acc: SequenceAccumulator<A, B, Acc>,
         indent: string,
-        left: (A | undefined)[],
-        right: (B | undefined)[]
+        left: (SequenceItemMatchTracker<A> | undefined)[],
+        right: (SequenceItemMatchTracker<B> | undefined)[]
     ): SequenceAccumulator<A, B, Acc> | undefined {
         const line = function (content: string) {
             return baseline(indent, content);
         };
 
-        const a_i = i >= 0 && i < a_sequence.length ? a_sequence[i] : undefined;
-        const b_j = j >= 0 && j < b_sequence.length ? b_sequence[j] : undefined;
-        const is_repeated_a_i = is_repeated_a(a_i);
-        const is_repeated_b_j = is_repeated_b(b_j);
-
         const i_next = i + 1;
         const j_next = j + 1;
         const a_i_next = i_next < a_sequence.length ? a_sequence[i_next] : undefined;
         const b_j_next = j_next < b_sequence.length ? b_sequence[j_next] : undefined;
-        const is_repeated_a_i_next = is_repeated_a(a_i_next);
-        const is_repeated_b_j_next = is_repeated_b(b_j_next);
 
         line(
-            `step(${left.map(a_str).join(', ')} <=> ${right.map(b_str).join(', ')} || ${i}: ${a_str(
+            `step(${left.map(aa_str).join(', ')} <=> ${right.map(bb_str).join(', ')} || ${i}: ${aa_str(
                 a_i
-            )}, ${j}: ${b_str(b_j)})`
+            )}, ${j}: ${bb_str(b_j)})`
         );
 
         if (i >= 0 && j >= 0) {
@@ -407,14 +491,16 @@ export function traverseAccumulateSequence<A, B, Acc>(
             }
 
             // i has terminated while j has not
-            if (a_i === undefined) {
+            if (a_i === undefined && b_j !== undefined) {
                 // if j is repeated (0 or more) just consume it (j + 1)
-                if (is_repeated_b_j) {
+                if (b_j.isSkippable()) {
                     if (acc.matches(undefined, b_j)) {
                         line('* i terminated but j is repeated');
                         return step(
                             i,
-                            j + 1,
+                            j_next,
+                            a_i,
+                            b_j_next,
                             acc.accumulate(undefined, b_j),
                             indent + '-',
                             [...left, a_i],
@@ -429,15 +515,18 @@ export function traverseAccumulateSequence<A, B, Acc>(
                     return undefined;
                 }
             }
+
             // j has terminated while i has not
-            if (b_j === undefined) {
+            if (a_i !== undefined && b_j === undefined) {
                 // if i is repeated (0 or more) just consume it (i + 1)
-                if (is_repeated_a_i) {
+                if (a_i.isSkippable()) {
                     if (acc.matches(a_i, undefined)) {
                         line('* j terminated but i is repeated');
                         return step(
-                            i + 1,
+                            i_next,
                             j,
+                            a_i_next,
+                            b_j,
                             acc.accumulate(a_i, undefined),
                             indent + '-',
                             [...left, a_i],
@@ -460,27 +549,46 @@ export function traverseAccumulateSequence<A, B, Acc>(
             }
         }
 
+        a_i = a_i?.matched();
+        b_j = b_j?.matched();
+
         // now consider all possible next steps
         // if the other node, b_j, is repeated, we add a skip edge from (j - 1) to (j + 1)
         // which is equivalent to moving from (i - 1, j - 1) to (i, j + 1)
         // which means that if we were at node (j - 1), one of the possible steps is to jump
         // to node (j + 1), or equivalently, if we are at node i and node j is repeated,
         // we can stay at node i and just move to next node (j + 1)
-        const t_i_steps = [
-            ...(is_repeated_a_i ? [i] : []),
-            i + 1,
-            ...(is_repeated_a_i_next && i + 2 < a_sequence.length ? [i + 2] : []),
-        ];
-        const t_j_steps = [
-            ...(is_repeated_b_j ? [j] : []),
-            j + 1,
-            ...(is_repeated_b_j_next && j + 2 < b_sequence.length ? [j + 2] : []),
-        ];
-        // be careful not to stay at the same state where (i, j) = (i_step, j_step)
-        const steps = t_i_steps.flatMap((i_step) =>
-            t_j_steps.flatMap((j_step) => (i_step !== i || j_step !== j ? [{ i_step, j_step }] : []))
+        const getNextStepsForItem = function <T>(
+            i: number,
+            t_i: SequenceItemMatchTracker<T> | undefined,
+            t_i_next: SequenceItemMatchTracker<T> | undefined,
+            t_sequence: SequenceItemMatchTracker<T>[]
+        ) {
+            // Note: this order of steps imples greedy/eager matching
+            const t_steps = [
+                ...(t_i?.hasMoreMatches() ? [{ index: i, item: t_i }] : []),
+                { index: i + 1, item: t_i_next },
+            ];
+            // There may be a streak of skippable items,
+            // we need to consider all cases, i.e.:
+            // - when next item is skipped
+            // - when next and after next item are skipped
+            // - when next, after next, and item after that are all skipped
+            // - ...
+            for (let k = i + 1; k < t_sequence.length - 1 && t_sequence[k].isSkippable(); k++) {
+                t_steps.push({ index: k + 1, item: t_sequence[k + 1] });
+            }
+            return t_steps;
+        };
+
+        const a_steps = getNextStepsForItem(i, a_i, a_i_next, a_sequence);
+        const b_steps = getNextStepsForItem(j, b_j, b_j_next, b_sequence);
+
+        // be careful not to stay at the same state where (i, j) = (a_step, b_step)
+        const steps = a_steps.flatMap((a_step) =>
+            b_steps.flatMap((b_step) => (a_step.index !== i || b_step.index !== j ? [{ a_step, b_step }] : []))
         );
-        line(`* steps: ${steps.map((s) => `(${s.i_step}, ${s.j_step})`).join(', ')}`);
+        line(`* steps: ${steps.map((s) => `(${s.a_step.index}, ${s.b_step.index})`).join(', ')}`);
         for (const next_step of steps) {
             let new_acc = acc;
             let new_left = left;
@@ -494,33 +602,47 @@ export function traverseAccumulateSequence<A, B, Acc>(
             }
 
             // Handle skip connections; if we are staying at a non-repeating node, we shouldn't accumulate it twice
-            if (next_step.i_step === i + 2 && /* redundant; implied */ is_repeated_a_i_next) {
+            if (next_step.a_step.index >= i + 2) {
                 // Skip, but match a_i_next with nothing
-                new_acc = new_acc.accumulate(a_i_next, undefined);
-                new_left.push(a_i_next);
-                new_right.push(undefined);
-            } else if (next_step.j_step === j + 2 && /* redundant; implied */ is_repeated_b_j_next) {
+                for (let k = i + 1; k < next_step.a_step.index; k++) {
+                    new_acc = new_acc.accumulate(a_sequence[k], undefined);
+                    new_left.push(a_sequence[k]);
+                    new_right.push(undefined);
+                }
+            } else if (next_step.b_step.index >= j + 2) {
                 // Skip, but match b_j_next with nothing
-                new_acc = new_acc.accumulate(undefined, b_j_next);
-                new_left.push(undefined);
-                new_right.push(b_j_next);
+                for (let k = j + 1; k < next_step.b_step.index; k++) {
+                    new_acc = new_acc.accumulate(undefined, b_sequence[k]);
+                    new_left.push(undefined);
+                    new_right.push(b_sequence[k]);
+                }
             }
 
             // we have found a match in one of the possible next steps
-            const step_res = step(next_step.i_step, next_step.j_step, new_acc, indent + '-', new_left, new_right);
+            const step_res = step(
+                next_step.a_step.index,
+                next_step.b_step.index,
+                next_step.a_step.item,
+                next_step.b_step.item,
+                new_acc,
+                indent + '-',
+                new_left,
+                new_right
+            );
             if (step_res !== undefined) {
                 return step_res;
             }
         }
         // no matches found in any possible next step
+        line('[REJECT] no matches found in any possible next step');
         return undefined;
     };
 
-    const result = step(-1, -1, acc, '', [], []);
+    const result = step(-1, -1, undefined, undefined, acc, '', [], []);
 
     baseline(
         '',
-        `[${a_sequence.map(a_str).join(';')}] ==?== [${b_sequence.map(b_str).join(';')}] ==> ${result?.toString()}`
+        `[${a_sequence.map(aa_str).join(';')}] ==?== [${b_sequence.map(bb_str).join(';')}] ==> ${result?.toString()}`
     );
 
     return result;
