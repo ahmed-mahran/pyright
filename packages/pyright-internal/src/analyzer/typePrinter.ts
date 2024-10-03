@@ -1112,7 +1112,14 @@ function printFunctionPartsInternal(
 
         // Handle subscriptable function type params.
         if (isSubscriptable && index === 0 && param.category === ParamCategory.Simple) {
-            type.shared.typeParams.forEach((typeParam) => typeParamStrings.push(print(typeParam)));
+            const tpParamType = FunctionType.getNotSelfOrClassFirstParamType(type);
+            const typeParams =
+                isClass(tpParamType) && isTupleClass(tpParamType)
+                    ? (tpParamType.priv.tupleTypeArgs ?? []).map((arg) => arg.type)
+                    : [tpParamType];
+            typeParams
+                .filter(isTypeVar)
+                .forEach((typeParam) => typeParamStrings.push(print(convertToInstance(typeParam))));
             return;
         }
 

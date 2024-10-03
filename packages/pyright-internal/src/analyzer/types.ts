@@ -2362,6 +2362,19 @@ export namespace FunctionType {
 
         return undefined;
     }
+
+    export function getNotSelfOrClassFirstParam(type: FunctionType) {
+        return type.shared.parameters[
+            FunctionType.isStaticMethod(type) || !type.shared.methodClass || !!type.priv.strippedFirstParamType ? 0 : 1
+        ];
+    }
+
+    export function getNotSelfOrClassFirstParamType(type: FunctionType) {
+        return FunctionType.getParamType(
+            type,
+            FunctionType.isStaticMethod(type) || !type.shared.methodClass || !!type.priv.strippedFirstParamType ? 0 : 1
+        );
+    }
 }
 
 //TODO maybe rename to DecoratableType
