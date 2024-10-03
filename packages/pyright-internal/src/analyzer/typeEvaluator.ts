@@ -2501,7 +2501,7 @@ export function createTypeEvaluator(
 
             // Extract only type params from '__getitem__' method removing
             // first 'self' param.
-            const typeParamsParam = getitemCallType.shared.parameters.slice(1);
+            let typeParamsParam = getitemCallType.shared.parameters.slice(1);
 
             const solution = buildSolutionFromSpecializedClass(evaluatorInterface, classType);
 
@@ -2511,6 +2511,9 @@ export function createTypeEvaluator(
             if (isFunction(originalType) || isClass(originalType)) {
                 functionName = originalType.shared.name;
                 typeParams = originalType.shared.typeParams;
+                if (isFunction(originalType)) {
+                    typeParamsParam = [FunctionType.getNotSelfOrClassFirstParam(originalType)];
+                }
             }
             return mapSignatures(callable, isFunction, isFunction, (signature) => {
                 const newFunction = FunctionType.createSynthesizedInstance(functionName);
