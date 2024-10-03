@@ -2848,6 +2848,13 @@ export namespace TypeVarTulpeIndexedVar {
         );
     }
 
+    export function length(start: TypeVarTulpeIndexedVar, end: TypeVarTulpeIndexedVar) {
+        if (start.index === end.index) {
+            return end.offset - start.offset + 1;
+        }
+        return undefined;
+    }
+
     export function toString(indexedVar: TypeVarTulpeIndexedVar) {
         if (indexedVar.index === undefined) {
             return indexedVar.offset.toString();
@@ -2886,6 +2893,13 @@ export namespace TypeVarTupleSubscript {
 
     export function isValidStart(subscript: TypeVarTupleSubscript): boolean {
         return TypeVarTulpeIndexedVar.isFirst(subscript.start);
+    }
+
+    export function length(subscript: TypeVarTupleSubscript) {
+        if (subscript.end) {
+            return TypeVarTulpeIndexedVar.length(subscript.start, subscript.end);
+        }
+        return 1;
     }
 
     export function toString(subsript: TypeVarTupleSubscript) {
