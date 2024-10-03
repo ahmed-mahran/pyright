@@ -175,6 +175,14 @@ export interface TypeBaseProps {
     // it is assumed to be zero.
     instantiableDepth: number | undefined;
 
+    // Used to handle nested references to mapped instantiable classes
+    // (e.g. type[type[type[T]]]). If the field isn't present,
+    // it is assumed to be zero. This is to detect whether the deepest
+    // instantiable is mapped or not, e.g. in type[type[type[T]]]
+    // if instantiableMappedDepth = 3 this means that T is not mapped
+    // if instantiableMappedDepth = 4 this means that T is mapped
+    instantiableMappedDepth: number | undefined;
+
     // Used in cases where the type is a special form when used in a
     // value expression such as UnionType, Literal, or Required.
     specialForm: ClassType | undefined;
@@ -228,6 +236,7 @@ export namespace TypeBase {
         if (!type.props) {
             type.props = {
                 instantiableDepth: undefined,
+                instantiableMappedDepth: undefined,
                 specialForm: undefined,
                 typeForm: undefined,
                 typeAliasInfo: undefined,
@@ -241,11 +250,19 @@ export namespace TypeBase {
         return type.props?.instantiableDepth ?? 0;
     }
 
+    export function getInstantiableMappedDepth(type: TypeBase<any>) {
+        return type.props?.instantiableMappedDepth ?? 0;
+    }
+
     export function setSpecialForm(type: TypeBase<any>, specialForm: ClassType | undefined) {
         TypeBase.addProps(type).specialForm = specialForm;
     }
 
     export function setInstantiableDepth(type: TypeBase<any>, depth: number | undefined) {
+        TypeBase.addProps(type).instantiableDepth = depth;
+    }
+
+    export function setInstantiableMappedDepth(type: TypeBase<any>, depth: number | undefined) {
         TypeBase.addProps(type).instantiableDepth = depth;
     }
 
@@ -3317,7 +3334,7 @@ export namespace TypeVarType {
 
     export function getKey(typeVarType: TypeVarType) {
         const keyBase = TypeVarType.getNameWithScope(typeVarType);
-        return MyPyrightExtensions.isMappedType(typeVarType) ? `${keyBase}-mapped` : keyBase;
+        return MyPyrightExtensions.isMappedTypeVar(typeVarType) ? `${keyBase}-mapped` : keyBase;
     }
 
     export function getReadableName(type: TypeVarType) {

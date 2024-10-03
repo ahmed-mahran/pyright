@@ -7,6 +7,7 @@ import {
     AnyType,
     ClassType,
     combineTypes,
+    isAnyOrUnknown,
     isAnyUnknownOrObject,
     isClass,
     isTypeSame,
@@ -22,6 +23,8 @@ import {
     UnknownType,
 } from './types';
 import {
+    convertToInstance,
+    convertToInstantiable,
     InferenceContext,
     isLiteralLikeType,
     isNoneInstance,
@@ -380,7 +383,7 @@ export namespace MyPyrightExtensions {
         function _deconstructMappedType(type: Type): InternalMapSpec {
             if (isMappedType(type)) {
                 if (TypeBase.isInstantiable(type) && !TypeBase.isInstance(type)) {
-                    const { map, arg } = _deconstructMappedType(TypeBase.cloneTypeAsInstance(type, /* cache */ false));
+                    const { map, arg } = _deconstructMappedType(unsetFlagMapped(convertToInstance(type)));
                     return { map: new MapType(getTypeClassType(evaluator), map), arg };
                 } else if (isClass(type) && isEffectivelyGenericClassType(type)) {
                     if (isTupleClass(type) && isIterTuple(type)) {
@@ -435,6 +438,7 @@ export namespace MyPyrightExtensions {
                 }
             } else {
                 return {
+                    map: isAnyOrUnknown(type) ? new MapType(newUnknownType()) : undefined,
                     arg: TypeBase.cloneType(type),
                 };
             }
@@ -504,9 +508,7 @@ export namespace MyPyrightExtensions {
                     ClassType.isBuiltIn(baseMap.outer, 'type')
                 ) {
                     const innerMapSpec = _deconstructMappedType2(
-                        TypeBase.isInstantiable(type)
-                            ? TypeBase.cloneTypeAsInstance(type, /* cache */ false)
-                            : TypeBase.cloneType(type),
+                        TypeBase.isInstantiable(type) ? convertToInstance(type) : TypeBase.cloneType(type),
                         baseMap.inner
                     );
                     return innerMapSpec
@@ -619,15 +621,34 @@ export namespace MyPyrightExtensions {
         return (type.flags & TypeFlags.Mapped) !== 0;
     }
 
+    export function isMappedTypeVar(typeVar: TypeVarType): boolean {
+        const isMapped = isMappedType(typeVar);
+        if (!isTypeVarTuple(typeVar) && isMapped && TypeBase.isInstantiable(typeVar)) {
+            return TypeBase.getInstantiableMappedDepth(typeVar) > TypeBase.getInstantiableDepth(typeVar);
+        }
+        return isMapped;
+    }
+
     export function setFlagMapped<T extends Type>(type: T): T {
         if (!isUnknown(type)) {
+            if (isMappedType(type) && TypeBase.isInstantiable(type)) {
+                TypeBase.setInstantiableMappedDepth(type, TypeBase.getInstantiableMappedDepth(type) + 1);
+            }
             type.flags |= TypeFlags.Mapped;
         }
         return type;
     }
 
     export function unsetFlagMapped<T extends Type>(type: T): T {
-        type.flags &= ~TypeFlags.Mapped;
+        if (type.props?.instantiableMappedDepth === undefined || type.props?.instantiableMappedDepth === 0) {
+            type.flags &= ~TypeFlags.Mapped;
+        } else {
+            const instantiableMappedDepth = TypeBase.getInstantiableMappedDepth(type) - 1;
+            TypeBase.setInstantiableMappedDepth(type, instantiableMappedDepth);
+            if (instantiableMappedDepth <= 0) {
+                type.flags &= ~TypeFlags.Mapped;
+            }
+        }
         return type;
     }
 
@@ -689,11 +710,14 @@ export namespace MyPyrightExtensions {
 
     export function specializeMapType(map: Type, type?: Type): Type {
         return mapSubtypes(map, (subtypeOfMap) => {
-            if (isClass(subtypeOfMap) && isEffectivelyGenericClassType(subtypeOfMap)) {
-                return specializeMapClassType(subtypeOfMap, type ? TypeBase.cloneType(type) : undefined);
-            } else {
-                return TypeBase.cloneType(subtypeOfMap);
+            if (isClass(subtypeOfMap)) {
+                if (ClassType.isBuiltIn(subtypeOfMap, 'type') && !!type) {
+                    return convertToInstantiable(TypeBase.cloneType(type));
+                } else if (isEffectivelyGenericClassType(subtypeOfMap)) {
+                    return specializeMapClassType(subtypeOfMap, type ? TypeBase.cloneType(type) : undefined);
+                }
             }
+            return TypeBase.cloneType(subtypeOfMap);
         });
     }
 
