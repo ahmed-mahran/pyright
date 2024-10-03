@@ -13,7 +13,7 @@ import { ArgumentNode, ExpressionNode, NameNode, ParamCategory } from '../parser
 import { ClassDeclaration, FunctionDeclaration, SpecialBuiltInClassDeclaration } from './declaration';
 import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
 import { Symbol, SymbolTable } from './symbol';
-import { isTupleClass } from './typeUtils';
+import { isTupleClass, isTypeVarSame } from './typeUtils';
 import { TypeWalker } from './typeWalker';
 
 export const enum TypeCategory {
@@ -2841,6 +2841,21 @@ export interface TypeVarTulpeIndexedVar {
 }
 
 export namespace TypeVarTulpeIndexedVar {
+    export function isSame(
+        indexedVar1: TypeVarTulpeIndexedVar | undefined,
+        indexedVar2: TypeVarTulpeIndexedVar | undefined
+    ): boolean {
+        return (
+            (!indexedVar1 && !indexedVar2) ||
+            (!!indexedVar1 &&
+                !!indexedVar2 &&
+                indexedVar1.index === indexedVar2.index &&
+                indexedVar1.offset === indexedVar2.offset &&
+                indexedVar1.total === indexedVar2.total &&
+                indexedVar1.isLastIndex === indexedVar2.isLastIndex)
+        );
+    }
+
     export function isFirst(indexedVar: TypeVarTulpeIndexedVar) {
         return indexedVar.index === undefined && indexedVar.offset === 0;
     }
@@ -2900,6 +2915,15 @@ export interface TypeVarTupleSubscript {
 }
 
 export namespace TypeVarTupleSubscript {
+    export function isSame(subscript1: TypeVarTupleSubscript, subscript2: TypeVarTupleSubscript): boolean {
+        return (
+            subscript1.kind === subscript2.kind &&
+            TypeVarTulpeIndexedVar.isSame(subscript1.start, subscript2.start) &&
+            TypeVarTulpeIndexedVar.isSame(subscript1.end, subscript2.end) &&
+            isTypeVarSame(subscript1.base, subscript2.base)
+        );
+    }
+
     export function areAdjacent(subscript: TypeVarTupleSubscript, nextSubscript: TypeVarTupleSubscript): boolean {
         return TypeVarTulpeIndexedVar.areAdjacent(subscript.end ?? subscript.start, nextSubscript.start);
     }
@@ -2946,8 +2970,6 @@ export interface TypeVarDetailsShared {
     defaultType: Type;
 
     declaredVariance: Variance;
-
-    subscript?: TypeVarTupleSubscript;
 
     // Internally created (e.g. for pseudo-generic classes)
     isSynthesized: boolean;
@@ -2998,6 +3020,8 @@ export interface TypeVarDetailsPriv {
     // If the TypeVar is bound form of a TypeVar, this refers to
     // the corresponding free TypeVar.
     freeTypeVar?: TypeVarType | undefined;
+
+    subscript?: TypeVarTupleSubscript;
 }
 
 export interface TypeVarType extends TypeBase<TypeCategory.TypeVar> {
@@ -3072,6 +3096,13 @@ export namespace TypeVarType {
             newInstance.priv.freeTypeVar = TypeVarType.cloneAsInstance(newInstance.priv.freeTypeVar);
         }
 
+        if (newInstance.priv.subscript) {
+            newInstance.priv.subscript = {
+                ...newInstance.priv.subscript,
+                base: TypeVarType.cloneAsInstance(newInstance.priv.subscript.base) as TypeVarTupleType,
+            };
+        }
+
         return newInstance;
     }
 
@@ -3084,6 +3115,13 @@ export namespace TypeVarType {
 
         if (newInstance.priv.freeTypeVar) {
             newInstance.priv.freeTypeVar = TypeVarType.cloneAsInstantiable(newInstance.priv.freeTypeVar);
+        }
+
+        if (newInstance.priv.subscript) {
+            newInstance.priv.subscript = {
+                ...newInstance.priv.subscript,
+                base: TypeVarType.cloneAsInstantiable(newInstance.priv.subscript.base) as TypeVarTupleType,
+            };
         }
 
         return newInstance;
@@ -3123,11 +3161,11 @@ export namespace TypeVarType {
                 (combined) => (newInstance.shared.mappedBoundType = combined)
             );
         }
-        newInstance.shared.subscript = { ...subscript, base: type };
+        newInstance.priv.subscript = { ...subscript, base: TypeBase.cloneType(type) };
         if (
             newInstance.priv.freeTypeVar &&
             isTypeVarTuple(newInstance.priv.freeTypeVar) &&
-            !newInstance.priv.freeTypeVar.shared.subscript
+            !newInstance.priv.freeTypeVar.priv.subscript
         ) {
             newInstance.priv.freeTypeVar = cloneAsSubscripted(newInstance.priv.freeTypeVar, subscript);
         }
@@ -3843,6 +3881,18 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
                 }
             } else {
                 if (mappedBoundType2) {
+                    return false;
+                }
+            }
+
+            const subscript1 = type1.priv.subscript;
+            const subscript2 = type2TypeVar.priv.subscript;
+            if (subscript1) {
+                if (!subscript2 || !TypeVarTupleSubscript.isSame(subscript1, subscript2)) {
+                    return false;
+                }
+            } else {
+                if (subscript2) {
                     return false;
                 }
             }

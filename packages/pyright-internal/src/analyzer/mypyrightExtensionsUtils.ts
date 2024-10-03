@@ -203,13 +203,26 @@ export namespace MyPyrightExtensions {
         // seem to be wrong.
 
         if (type && isTypeVarTuple(type)) {
+            const clone = TypeBase.cloneType(type);
             const mappedBoundType = convertToMappedType(
                 evaluator,
                 map,
-                isMappedType(type) ? type.shared.mappedBoundType : type.shared.boundType
+                isMappedType(clone) ? clone.shared.mappedBoundType : clone.shared.boundType
             );
-            type.shared.mappedBoundType = createBoundForTypeVar(evaluator, type, mappedBoundType);
-            return setFlagMapped(TypeBase.cloneType(type));
+            clone.shared.mappedBoundType = createBoundForTypeVar(evaluator, clone, mappedBoundType);
+            if (clone.priv.freeTypeVar) {
+                const mappedFreeTypeVar = convertToMappedType(evaluator, map, clone.priv.freeTypeVar);
+                if (isTypeVarTuple(mappedFreeTypeVar)) {
+                    clone.priv.freeTypeVar = mappedFreeTypeVar;
+                }
+            }
+            if (clone.priv.subscript) {
+                const mappedSubscript = convertToMappedType(evaluator, map, clone.priv.subscript.base);
+                if (isTypeVarTuple(mappedSubscript)) {
+                    clone.priv.subscript.base = mappedSubscript;
+                }
+            }
+            return setFlagMapped(clone);
         } else if (type && isClass(type) && isTupleClass(type) && isIterTuple(type)) {
             const clone = TypeBase.cloneType(type);
             clone.priv.tupleTypeArgs = type.priv.tupleTypeArgs?.map((arg) => ({
@@ -414,8 +427,20 @@ export namespace MyPyrightExtensions {
                 } else if (isTypeVarTuple(type)) {
                     //TODO handle constraints maybe?
                     const clone = unsetFlagMapped(TypeBase.cloneType(type));
-                    if (type.shared.mappedBoundType) {
-                        const { map, arg } = _deconstructMappedType(type.shared.mappedBoundType);
+                    if (clone.priv.freeTypeVar) {
+                        const { arg } = _deconstructMappedType(clone.priv.freeTypeVar);
+                        if (!!arg && isTypeVarTuple(arg)) {
+                            clone.priv.freeTypeVar = arg;
+                        }
+                    }
+                    if (clone.priv.subscript) {
+                        const { arg } = _deconstructMappedType(clone.priv.subscript.base);
+                        if (!!arg && isTypeVarTuple(arg)) {
+                            clone.priv.subscript.base = arg;
+                        }
+                    }
+                    if (clone.shared.mappedBoundType) {
+                        const { map, arg } = _deconstructMappedType(clone.shared.mappedBoundType);
                         clone.shared.boundType = !!arg && !isTupleGradualForm(arg) ? arg : undefined;
                         return { map, arg: clone };
                     } else {
@@ -560,6 +585,18 @@ export namespace MyPyrightExtensions {
                     //TODO handle constraints maybe?
 
                     const clone = unsetFlagMapped(TypeBase.cloneType(type));
+                    if (clone.priv.freeTypeVar) {
+                        const freeTypeVarMapSpec = _deconstructMappedType2(clone.priv.freeTypeVar, baseMap);
+                        if (!!freeTypeVarMapSpec?.arg && isTypeVarTuple(freeTypeVarMapSpec.arg)) {
+                            clone.priv.freeTypeVar = freeTypeVarMapSpec.arg;
+                        }
+                    }
+                    if (clone.priv.subscript) {
+                        const subscriptMapSpec = _deconstructMappedType2(clone.priv.subscript.base, baseMap);
+                        if (!!subscriptMapSpec?.arg && isTypeVarTuple(subscriptMapSpec.arg)) {
+                            clone.priv.subscript.base = subscriptMapSpec.arg;
+                        }
+                    }
                     const boundType = isMappedType(type) ? type.shared.mappedBoundType : type.shared.boundType;
                     if (boundType) {
                         const innerMapSpec = _deconstructMappedType2(boundType, baseMap);
