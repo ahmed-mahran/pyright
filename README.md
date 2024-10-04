@@ -307,7 +307,7 @@ Similar PEP drafts:
 - [A Map Operator for Variadic Type Variables](https://docs.google.com/document/d/1szTVcFyLznoDT7phtT-6Fpvp27XaBw9DmbTLHrB6BE4/edit).
 - [Type Transformations on Variadic Generics](https://discuss.python.org/t/pre-pep-considerations-and-feedback-type-transformations-on-variadic-generics/50605).
 
-# Publishing on VSCode Marketplace
+<!-- # Publishing on VSCode Marketplace
 
 **TL;DR** VSCode marketplace has removed the extension and locked my account without notice.
 
@@ -325,4 +325,4 @@ Similar PEP drafts:
 
 - [2024-09-19] After emailing the support team, I received this response:
 
-  > We have locked the extension after a thorough investigation due to security and privacy concerns.
+  > We have locked the extension after a thorough investigation due to security and privacy concerns. -->
