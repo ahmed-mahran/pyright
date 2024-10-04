@@ -2873,6 +2873,8 @@ export function getScopeIdForNode(node: ParseNode): string {
         name = node.d.name.d.value;
     } else if (node.nodeType === ParseNodeType.Function) {
         name = node.d.name.d.value;
+    } else if (node.nodeType === ParseNodeType.Index && node.d.leftExpr.nodeType === ParseNodeType.MemberAccess) {
+        name = node.d.leftExpr.d.member.d.value;
     }
 
     const fileInfo = AnalyzerNodeInfo.getFileInfo(node);

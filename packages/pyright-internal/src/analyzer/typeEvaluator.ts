@@ -393,6 +393,8 @@ interface MatchArgsToParamsResult {
 
 export interface MemberAccessTypeResult {
     type: Type;
+    // constraints in case type is a descriptor and has non-resolved type vars
+    descriptorConstraints?: ConstraintTracker | undefined;
     isDescriptorApplied?: boolean;
     isAsymmetricAccessor?: boolean;
     memberAccessDeprecationInfo?: MemberAccessDeprecationInfo;
@@ -2399,6 +2401,7 @@ export function createTypeEvaluator(
                 narrowedTypeForSet: memberInfo.narrowedTypeForSet,
                 memberAccessDeprecationInfo: memberInfo.memberAccessDeprecationInfo,
                 typeErrors: memberInfo.isDescriptorError,
+                descriptorConstraints: memberInfo.descriptorConstraints,
             };
         }
 
@@ -4532,7 +4535,8 @@ export function createTypeEvaluator(
                         setErrorNode: srcExpr,
                         setExpectedTypeDiag: expectedTypeDiagAddendum,
                     },
-                    EvalFlags.None
+                    EvalFlags.None,
+                    /* constraints */ undefined
                 );
 
                 writeTypeCache(target, typeResult, EvalFlags.None);
@@ -4731,7 +4735,13 @@ export function createTypeEvaluator(
                     EvalFlags.IndexBaseDefaults,
                     /* constraints */ undefined
                 );
-                getTypeOfIndexWithBaseType(node, baseTypeResult, { method: 'del' }, EvalFlags.None);
+                getTypeOfIndexWithBaseType(
+                    node,
+                    baseTypeResult,
+                    { method: 'del' },
+                    EvalFlags.None,
+                    /* constraints */ undefined
+                );
                 writeTypeCache(node, { type: UnboundType.create() }, EvalFlags.None);
                 break;
             }
@@ -5698,6 +5708,7 @@ export function createTypeEvaluator(
         const isRequired = false;
         const isNotRequired = false;
         let memberAccessDeprecationInfo: MemberAccessDeprecationInfo | undefined;
+        let descriptorConstraints: ConstraintTracker | undefined;
 
         if (usage?.setType?.isIncomplete) {
             isIncomplete = true;
@@ -5836,13 +5847,21 @@ export function createTypeEvaluator(
                 }
 
                 if (!typeResult) {
+                    let memberAccessFlags: MemberAccessFlags = MemberAccessFlags.Default;
+                    if ((flags & EvalFlags.TypeExpression) !== 0) {
+                        memberAccessFlags |= MemberAccessFlags.TypeExpression;
+                    }
+                    if ((flags && EvalFlags.NoIndexBaseTypeVarResolution) !== 0) {
+                        memberAccessFlags |= MemberAccessFlags.SkipDescriptorTypeVarResolution;
+                    }
+
                     typeResult = getTypeOfBoundMember(
                         node.d.member,
                         baseType,
                         memberName,
                         usage,
                         diag,
-                        (flags & EvalFlags.TypeExpression) === 0 ? undefined : MemberAccessFlags.TypeExpression,
+                        memberAccessFlags,
                         baseTypeResult.bindToSelfType
                     );
                 }
@@ -5877,6 +5896,8 @@ export function createTypeEvaluator(
                     if (typeResult.memberAccessDeprecationInfo) {
                         memberAccessDeprecationInfo = typeResult.memberAccessDeprecationInfo;
                     }
+
+                    descriptorConstraints = typeResult.descriptorConstraints;
                 }
                 break;
             }
@@ -6155,6 +6176,7 @@ export function createTypeEvaluator(
             isNotRequired,
             memberAccessDeprecationInfo,
             typeErrors,
+            descriptorConstraints,
         };
     }
 
@@ -6323,6 +6345,7 @@ export function createTypeEvaluator(
         let isAsymmetricAccessor = false;
         let isDescriptorApplied = false;
         let memberAccessDeprecationInfo: MemberAccessDeprecationInfo | undefined;
+        const allDescriptorConstraints: ConstraintTracker[] = [];
 
         type = mapSubtypes(type, (subtype) => {
             const concreteSubtype = makeTopLevelTypeVarsConcrete(subtype);
@@ -6342,6 +6365,10 @@ export function createTypeEvaluator(
                     usage,
                     diag
                 );
+
+                if (descResult.descriptorConstraints) {
+                    allDescriptorConstraints.push(descResult.descriptorConstraints);
+                }
 
                 if (descResult.isAsymmetricAccessor) {
                     isAsymmetricAccessor = true;
@@ -6477,6 +6504,7 @@ export function createTypeEvaluator(
         return {
             symbol: memberInfo.symbol,
             type,
+            descriptorConstraints: ConstraintTracker.combine(allDescriptorConstraints),
             isTypeIncomplete,
             isDescriptorError,
             isClassMember: !memberInfo.isInstanceMember,
@@ -6503,6 +6531,7 @@ export function createTypeEvaluator(
         diag: DiagnosticAddendum | undefined
     ): MemberAccessTypeResult {
         const isAccessedThroughObject = TypeBase.isInstance(classType);
+        const shouldResolveDescriptorTypeVars = (flags & MemberAccessFlags.SkipDescriptorTypeVarResolution) === 0;
 
         let accessMethodName: string;
         if (usage.method === 'get') {
@@ -6593,7 +6622,9 @@ export function createTypeEvaluator(
             }
 
             if (accessMethodClass) {
-                const constraints = new ConstraintTracker(evaluatorInterface);
+                const constraints = shouldResolveDescriptorTypeVars
+                    ? new ConstraintTracker(evaluatorInterface)
+                    : undefined;
                 accessMethodClass = selfSpecializeClass(accessMethodClass);
                 assignType(
                     ClassType.cloneAsInstance(accessMethodClass),
@@ -6601,7 +6632,9 @@ export function createTypeEvaluator(
                     /* diag */ undefined,
                     constraints
                 );
-                accessMethodClass = solveAndApplyConstraints(accessMethodClass, constraints) as ClassType;
+                if (constraints) {
+                    accessMethodClass = solveAndApplyConstraints(accessMethodClass, constraints) as ClassType;
+                }
 
                 const specializedType = partiallySpecializeType(
                     evaluatorInterface,
@@ -6723,9 +6756,50 @@ export function createTypeEvaluator(
         }
 
         if (!callResult.argumentErrors) {
-            return {
+            const returnType = callResult.returnType;
+            let type: Type | undefined;
+            let descriptorConstraints: ConstraintTracker | undefined;
+
+            if (usage.method === 'get') {
+                if (shouldResolveDescriptorTypeVars) {
+                    type = returnType;
+                } else if (
+                    !!returnType &&
+                    !!callResult.overloadsUsedForCall &&
+                    callResult.overloadsUsedForCall.length > 0
+                ) {
+                    // Collect and combine unsolved return types and corresponding
+                    // constraints from original overloads of property/descriptor
+                    // access method (e.g. __get__ or fget) type (methodType).
+                    const unsolvedReturnTypes: Type[] = [];
+                    const allConstraints: ConstraintTracker[] = [];
+                    callResult.overloadsUsedForCall.forEach((overload) => {
+                        const overloadReturnType = FunctionType.getEffectiveReturnType(overload);
+                        if (overloadReturnType) {
+                            unsolvedReturnTypes.push(overloadReturnType);
+                            const constraints = new ConstraintTracker(evaluatorInterface);
+                            assignType(overloadReturnType, returnType, /* diag */ undefined, constraints);
+                            allConstraints.push(constraints);
+                        }
+                    });
+
+                    if (unsolvedReturnTypes.length > 0) {
+                        type = combineTypes(unsolvedReturnTypes);
+                        descriptorConstraints = ConstraintTracker.combine(allConstraints);
+                    }
+                }
+
+                if (!type) {
+                    type = UnknownType.create();
+                }
+            } else {
                 // For set or delete, always return Any.
-                type: usage.method === 'get' ? callResult.returnType ?? UnknownType.create() : AnyType.create(),
+                type = AnyType.create();
+            }
+
+            return {
+                type,
+                descriptorConstraints,
                 isDescriptorApplied: true,
                 isAsymmetricAccessor,
                 memberAccessDeprecationInfo: deprecationInfo,
@@ -6980,7 +7054,7 @@ export function createTypeEvaluator(
     function getTypeOfIndex(node: IndexNode, flags = EvalFlags.None): TypeResult {
         const baseTypeResult = getTypeOfExpression(
             node.d.leftExpr,
-            flags | EvalFlags.IndexBaseDefaults,
+            flags | EvalFlags.IndexBaseDefaults | EvalFlags.NoIndexBaseTypeVarResolution,
             /* constraints */ undefined
         );
 
@@ -7031,13 +7105,61 @@ export function createTypeEvaluator(
             }
         }
 
+        // If baseType is subscriptable, we don't want to apply descriptor constraints now if any
+        // Subscriptable method decorator holds type of owner, we defer owner specialization until
+        // index params are resolved.
+        // @subscriptablemethod
+        // def fn[*As, B](self: Owner[B, *As], tp: Map[type, *As, B]): ...
+        // owner.fn[int, int, str]
+        // if we resolve self first        : B = int, *As = *tuple[int, str]
+        // if we resolve index params first: *As = *tuple[int, int], B = str
+        // descriptor constraints should hold solutions when self is resolved first
+        if (
+            (!isClass(baseTypeResult.type) || !MyPyrightExtensions.isSubscriptable(baseTypeResult.type)) &&
+            !!baseTypeResult.descriptorConstraints
+        ) {
+            baseTypeResult.type = solveAndApplyConstraints(baseTypeResult.type, baseTypeResult.descriptorConstraints);
+        }
+
+        // We need to collect type var constraints of index params
+        const indexTypeConstraints = new ConstraintTracker(evaluatorInterface);
         const indexTypeResultEvalFlags = flags | EvalFlags.NoConvertSpecialForm;
         const indexTypeResult = getTypeOfIndexWithBaseType(
             node,
             baseTypeResult,
             { method: 'get' },
-            indexTypeResultEvalFlags
+            indexTypeResultEvalFlags,
+            indexTypeConstraints
         );
+
+        // If base type is subscriptable method, this is the time to resolve deferred type vars
+        // If descriptorConstraints exists, this implies subscriptable is a descriptor
+        if (
+            isClass(baseTypeResult.type) &&
+            MyPyrightExtensions.isSubscriptable(baseTypeResult.type) &&
+            !!baseTypeResult.descriptorConstraints &&
+            baseTypeResult.type.priv.typeArgs
+        ) {
+            const unsolvedOwnerType = baseTypeResult.type.priv.typeArgs[0];
+            // Resolve type vars from index items
+            const ownerTypeWithIndexConstraints = solveAndApplyConstraints(unsolvedOwnerType, indexTypeConstraints);
+            // Resolve type vars from descriptor
+            const ownerTypeWithBaseConstraints = solveAndApplyConstraints(
+                unsolvedOwnerType,
+                baseTypeResult.descriptorConstraints
+            );
+            // Then resolve remaining type vars from descriptor
+            // Constraints in descriptor which are not resolved in index items
+            const diffConstraints = new ConstraintTracker(evaluatorInterface);
+            assignType(
+                ownerTypeWithIndexConstraints,
+                ownerTypeWithBaseConstraints,
+                /* diag */ undefined,
+                diffConstraints
+            );
+            // Finally, resolve those remainging constraints from descriptor
+            indexTypeResult.type = solveAndApplyConstraints(indexTypeResult.type, diffConstraints);
+        }
 
         if (isCodeFlowSupportedForReference(node)) {
             // We limit type narrowing for index expressions to built-in types that are
@@ -7590,7 +7712,8 @@ export function createTypeEvaluator(
         node: IndexNode,
         baseTypeResult: TypeResult,
         usage: EvaluatorUsage,
-        flags: EvalFlags
+        flags: EvalFlags,
+        constraints: ConstraintTracker | undefined
     ): TypeResult {
         // Handle the case where we're specializing a generic type alias.
         const typeAliasResult = createSpecializedTypeAlias(node, baseTypeResult.type, flags);
@@ -7712,7 +7835,8 @@ export function createTypeEvaluator(
                                 concreteSubtype,
                                 selfType,
                                 usage,
-                                flags
+                                flags,
+                                constraints
                             );
                             if (typeResult.typeErrors) {
                                 typeErrors = true;
@@ -7850,7 +7974,14 @@ export function createTypeEvaluator(
                 }
 
                 if (isClassInstance(concreteSubtype)) {
-                    const typeResult = getTypeOfIndexedObjectOrClass(node, concreteSubtype, selfType, usage, flags);
+                    const typeResult = getTypeOfIndexedObjectOrClass(
+                        node,
+                        concreteSubtype,
+                        selfType,
+                        usage,
+                        flags,
+                        constraints
+                    );
                     if (typeResult.typeErrors) {
                         typeErrors = true;
                     }
@@ -7868,7 +7999,8 @@ export function createTypeEvaluator(
                                 type,
                                 /* selfType */ undefined,
                                 usage,
-                                flags
+                                flags,
+                                constraints
                             );
                             if (!typeResult.typeErrors) {
                                 return typeResult.type;
@@ -8077,7 +8209,8 @@ export function createTypeEvaluator(
         baseType: ClassType,
         selfType: ClassType | TypeVarType | undefined,
         usage: EvaluatorUsage,
-        flags: EvalFlags
+        flags: EvalFlags,
+        constraints: ConstraintTracker | undefined
     ): TypeResult {
         // Handle index operations for TypedDict classes specially.
         if (isClassInstance(baseType) && ClassType.isTypedDictClass(baseType)) {
@@ -8240,7 +8373,7 @@ export function createTypeEvaluator(
             node,
             argList,
             { type: itemMethodType },
-            /* constraints */ undefined,
+            constraints,
             /* skipUnknownArgCheck */ true,
             /* inferenceContext */ undefined
         );
@@ -12421,6 +12554,21 @@ export function createTypeEvaluator(
         }
 
         const liveTypeVarScopes = ParseTreeUtils.getTypeVarScopesForNode(errorNode);
+        // Functions corresponding to subscriptable method decorators have their
+        // self type with unresolved type vars. We need to keep the scope of those
+        // type vars the same as their original subscriptable decorator. That's the
+        // scope where we have solution for those type vars.
+        if (
+            !!type.priv.boundToType &&
+            MyPyrightExtensions.isSubscriptable(type.priv.boundToType) &&
+            !!type.priv.boundToType.priv.typeArgs
+        ) {
+            getTypeVarArgsRecursive(type.priv.boundToType.priv.typeArgs[0]).forEach((arg) => {
+                if (arg.priv.scopeId) {
+                    liveTypeVarScopes.push(arg.priv.scopeId);
+                }
+            });
+        }
         specializedReturnType = adjustCallableReturnType(errorNode, specializedReturnType, liveTypeVarScopes);
 
         if (specializedInitSelfType) {

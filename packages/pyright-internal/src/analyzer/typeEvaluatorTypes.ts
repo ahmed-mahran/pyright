@@ -171,10 +171,15 @@ export const enum EvalFlags {
     // with the enclosing class or an outer scope.
     EnforceClassTypeVarScope = 1 << 31,
 
+    // Defers resolution of type vars for index base type until index result
+    // type is determined. This is used for subscriptable methods so that
+    // method index type arguments are evaluated first before self type.
+    NoIndexBaseTypeVarResolution = 1 << 32,
+
     // Defaults used for evaluating the LHS of a call expression.
     CallBaseDefaults = NoSpecialize,
 
-    // Defaults used for evaluating the LHS of a member access expression.
+    // Defaults used for evaluating the LHS of a index access expression.
     IndexBaseDefaults = NoSpecialize,
 
     // Defaults used for evaluating the LHS of a member access expression.
@@ -247,6 +252,10 @@ export interface TypeResult<T extends Type = Type> {
 
     // Deprecation messages related to magic methods.
     magicMethodDeprecationInfo?: MagicMethodDeprecationInfo;
+
+    // Type var constraints if member is a descriptor (or a property) with
+    // delayed unresolved type vars.
+    descriptorConstraints?: ConstraintTracker | undefined;
 }
 
 export interface TypeResultWithNode extends TypeResult {
@@ -450,6 +459,10 @@ export interface ClassMemberLookup {
 
     // Deprecation messages related to magic methods invoked via the member access.
     memberAccessDeprecationInfo?: MemberAccessDeprecationInfo;
+
+    // Type var constraints if member is a descriptor (or a property)
+    // with unresolved type vars.
+    descriptorConstraints?: ConstraintTracker | undefined;
 }
 
 export interface SolveConstraintsOptions {
