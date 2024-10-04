@@ -86,6 +86,9 @@ export const enum PrintTypeFlags {
     // Use the fully-qualified name of classes, type aliases, modules,
     // and functions rather than short names.
     UseFullyQualifiedNames = 1 << 12,
+
+    // Omit TypeVar scopes.
+    OmitTypeVarScopes = 1 << 13,
 }
 
 export type FunctionReturnTypeCallback = (type: FunctionType) => Type;
@@ -219,15 +222,15 @@ function printTypeInternal(
                 recursionTypes.push(type);
                 let aliasName =
                     (printTypeFlags & PrintTypeFlags.UseFullyQualifiedNames) !== 0
-                        ? aliasInfo.fullName
-                        : aliasInfo.name;
+                        ? aliasInfo.shared.fullName
+                        : aliasInfo.shared.name;
 
                 // Use the fully-qualified name if the name isn't unique.
                 if (!uniqueNameMap.isUnique(aliasName)) {
-                    aliasName = aliasInfo.fullName;
+                    aliasName = aliasInfo.shared.fullName;
                 }
 
-                const typeParams = aliasInfo.typeParams;
+                const typeParams = aliasInfo.shared.typeParams;
 
                 if (typeParams && typeParams.length > 0) {
                     let argumentStrings: string[] | undefined;
@@ -321,7 +324,9 @@ function printTypeInternal(
 
     if (
         recursionTypes.find(
-            (t) => t === type || (!!t.props?.typeAliasInfo && t.props.typeAliasInfo.fullName === aliasInfo?.fullName)
+            (t) =>
+                t === type ||
+                (!!t.props?.typeAliasInfo && t.props.typeAliasInfo.shared.fullName === aliasInfo?.shared.fullName)
         ) ||
         recursionTypes.length > maxTypeRecursionCount
     ) {
@@ -332,13 +337,13 @@ function printTypeInternal(
         }
 
         if (aliasInfo) {
-            if (!aliasInfo.typeParams) {
+            if (!aliasInfo.shared.typeParams) {
                 let name =
                     (printTypeFlags & PrintTypeFlags.UseFullyQualifiedNames) !== 0
-                        ? aliasInfo.fullName
-                        : aliasInfo.name;
+                        ? aliasInfo.shared.fullName
+                        : aliasInfo.shared.name;
                 if (!uniqueNameMap.isUnique(name)) {
-                    name = aliasInfo.fullName;
+                    name = aliasInfo.shared.fullName;
                 }
                 return name;
             }
@@ -572,10 +577,13 @@ function printTypeInternal(
                         );
 
                         if (!isAnyOrUnknown(type.shared.boundType)) {
-                            if (printTypeFlags & PrintTypeFlags.PythonSyntax) {
-                                boundTypeString = `Self`;
-                            } else {
+                            if (
+                                (printTypeFlags & PrintTypeFlags.PythonSyntax) === 0 &&
+                                (printTypeFlags & PrintTypeFlags.OmitTypeVarScopes) === 0
+                            ) {
                                 boundTypeString = `Self@${boundTypeString}`;
+                            } else {
+                                boundTypeString = `Self`;
                             }
                         }
 
@@ -594,7 +602,8 @@ function printTypeInternal(
                 if (isParamSpec(type)) {
                     const paramSpecText = _getReadableTypeVarName(
                         type,
-                        (printTypeFlags & PrintTypeFlags.PythonSyntax) !== 0
+                        (printTypeFlags & PrintTypeFlags.PythonSyntax) === 0 &&
+                            (printTypeFlags & PrintTypeFlags.OmitTypeVarScopes) === 0
                     );
 
                     if (type.priv.paramSpecAccess) {
@@ -603,7 +612,11 @@ function printTypeInternal(
                     return paramSpecText;
                 }
 
-                let typeVarName = _getReadableTypeVarName(type, (printTypeFlags & PrintTypeFlags.PythonSyntax) !== 0);
+                let typeVarName = _getReadableTypeVarName(
+                    type,
+                    (printTypeFlags & PrintTypeFlags.PythonSyntax) === 0 &&
+                        (printTypeFlags & PrintTypeFlags.OmitTypeVarScopes) === 0
+                );
 
                 if (isTypeVarTuple(type)) {
                     if (type.priv.isUnpacked) {
@@ -1293,12 +1306,8 @@ function _printNestedInstantiable(type: Type, textToWrap: string) {
     return textToWrap;
 }
 
-function _getReadableTypeVarName(type: TypeVarType, usePythonSyntax: boolean) {
-    if (usePythonSyntax) {
-        return type.shared.name;
-    }
-
-    return TypeVarType.getReadableName(type);
+function _getReadableTypeVarName(type: TypeVarType, includeScope: boolean) {
+    return TypeVarType.getReadableName(type, includeScope);
 }
 
 function _getTypeVarVarianceText(type: TypeVarType) {
@@ -1346,8 +1355,8 @@ class UniqueNameMap {
             if (!expandTypeAlias) {
                 const typeAliasName =
                     (this._printTypeFlags & PrintTypeFlags.UseFullyQualifiedNames) !== 0
-                        ? aliasInfo.fullName
-                        : aliasInfo.name;
+                        ? aliasInfo.shared.fullName
+                        : aliasInfo.shared.name;
                 this._addIfUnique(typeAliasName, type, /* useTypeAliasName */ true);
 
                 // Recursively add the type arguments if present.
@@ -1452,7 +1461,7 @@ class UniqueNameMap {
 
     private _isSameTypeName(type1: Type, type2: Type, useTypeAliasName: boolean): boolean {
         if (useTypeAliasName) {
-            return type1.props?.typeAliasInfo?.fullName === type2.props?.typeAliasInfo?.fullName;
+            return type1.props?.typeAliasInfo?.shared.fullName === type2.props?.typeAliasInfo?.shared.fullName;
         }
 
         if (isClass(type1) && isClass(type2)) {

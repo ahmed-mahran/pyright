@@ -9,18 +9,21 @@
 
 import { fail } from '../common/debug';
 import { DiagnosticAddendum } from '../common/diagnostic';
-import { LocAddendum } from '../localization/localize';
-import { ExpressionNode, SliceNode } from '../parser/parseNodes';
-import { assignTypeVar as doAssignTypeVar } from './constraintSolver';
+import { DiagnosticRule } from '../common/diagnosticRules';
+import { LocAddendum, LocMessage } from '../localization/localize';
+import { ExpressionNode, ParseNodeType, SliceNode, TupleNode } from '../parser/parseNodes';
+import { addConstraintsForExpectedType, assignTypeVar as doAssignTypeVar } from './constraintSolver';
 import { ConstraintTracker } from './constraintTracker';
 import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
+import { getTypeVarScopesForNode } from './parseTreeUtils';
 import { DestItemMatches, matchAccumulateSequence } from './sequenceMatching';
-import { AssignTypeFlags, TypeEvaluator } from './typeEvaluatorTypes';
+import { AssignTypeFlags, EvalFlags, maxInferredContainerDepth, TypeEvaluator, TypeResult } from './typeEvaluatorTypes';
 import {
     AnyType,
     ClassType,
     combineTypes,
     hasTypeVar,
+    isAny,
     isAnyOrUnknown,
     isAnyUnknownOrObject,
     isClass,
@@ -41,15 +44,254 @@ import {
     TypeVarTupleSubscriptKind,
     TypeVarTupleType,
     TypeVarType,
+    UnknownType,
 } from './types';
 import {
+    convertToInstance,
+    doForEachSubtype,
+    getContainerDepth,
+    InferenceContext,
     isLiteralType,
     isTupleClass,
     isTupleGradualForm,
     isTypeVarSame,
     isUnboundedTupleClass,
+    makeInferenceContext,
     specializeTupleClass,
+    transformPossibleRecursiveTypeAlias,
 } from './typeUtils';
+
+// If a tuple expression with no declared type contains a large number
+// of elements, it can cause performance issues. This value limits the
+// number of elements that will be included in the tuple type before
+// we default to tuple[Unknown, ...].
+const maxInferredTupleEntryCount = 256;
+
+export function makeTupleObject(evaluator: TypeEvaluator, typeArgs: TupleTypeArg[], isUnpacked = false) {
+    const tupleClass = evaluator.getTupleClassType();
+    if (tupleClass && isInstantiableClass(tupleClass)) {
+        return convertToInstance(specializeTupleClass(tupleClass, typeArgs, /* isTypeArgExplicit */ true, isUnpacked));
+    }
+
+    return UnknownType.create();
+}
+
+export function getTypeOfTuple(
+    evaluator: TypeEvaluator,
+    node: TupleNode,
+    flags: EvalFlags,
+    inferenceContext: InferenceContext | undefined,
+    constraints: ConstraintTracker | undefined
+): TypeResult {
+    if ((flags & EvalFlags.TypeExpression) !== 0 && node.parent?.nodeType !== ParseNodeType.Argument) {
+        // This is allowed inside of an index trailer, specifically
+        // to support Tuple[()], which is the documented way to annotate
+        // a zero-length tuple.
+        const diag = new DiagnosticAddendum();
+        diag.addMessage(LocAddendum.useTupleInstead());
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportInvalidTypeForm,
+            LocMessage.tupleInAnnotation() + diag.getString(),
+            node
+        );
+
+        return { type: UnknownType.create() };
+    }
+
+    if ((flags & EvalFlags.InstantiableType) !== 0 && node.d.items.length === 0 && !inferenceContext) {
+        return { type: makeTupleObject(evaluator, []), isEmptyTupleShorthand: true };
+    }
+
+    flags &= ~(EvalFlags.TypeExpression | EvalFlags.StrLiteralAsType | EvalFlags.InstantiableType);
+
+    // If the expected type is a union, recursively call for each of the subtypes
+    // to find one that matches.
+    let expectedType = inferenceContext?.expectedType;
+    let expectedTypeContainsAny = inferenceContext && isAny(inferenceContext.expectedType);
+
+    if (inferenceContext && isUnion(inferenceContext.expectedType)) {
+        let matchingSubtype: Type | undefined;
+
+        doForEachSubtype(
+            inferenceContext.expectedType,
+            (subtype) => {
+                if (isAny(subtype)) {
+                    expectedTypeContainsAny = true;
+                }
+
+                if (!matchingSubtype) {
+                    const subtypeResult = evaluator.useSpeculativeMode(node, () => {
+                        return getTypeOfTupleWithContext(
+                            evaluator,
+                            node,
+                            flags,
+                            makeInferenceContext(subtype),
+                            constraints
+                        );
+                    });
+
+                    if (subtypeResult && evaluator.assignType(subtype, subtypeResult.type)) {
+                        matchingSubtype = subtype;
+                    }
+                }
+            },
+            /* sortSubtypes */ true
+        );
+
+        expectedType = matchingSubtype;
+    }
+
+    let expectedTypeDiagAddendum: DiagnosticAddendum | undefined;
+    if (expectedType) {
+        const result = getTypeOfTupleWithContext(
+            evaluator,
+            node,
+            flags,
+            makeInferenceContext(expectedType),
+            constraints
+        );
+
+        if (result && !result.typeErrors) {
+            return result;
+        }
+
+        expectedTypeDiagAddendum = result?.expectedTypeDiagAddendum;
+    }
+
+    const typeResult = getTypeOfTupleInferred(evaluator, node, flags);
+
+    // If there was an expected type of Any, replace the resulting type
+    // with Any rather than return a type with unknowns.
+    if (expectedTypeContainsAny) {
+        typeResult.type = AnyType.create();
+    }
+
+    return { ...typeResult, expectedTypeDiagAddendum };
+}
+
+export function getTypeOfTupleWithContext(
+    evaluator: TypeEvaluator,
+    node: TupleNode,
+    flags: EvalFlags,
+    inferenceContext: InferenceContext,
+    constraints: ConstraintTracker | undefined
+): TypeResult | undefined {
+    inferenceContext.expectedType = transformPossibleRecursiveTypeAlias(evaluator, inferenceContext.expectedType);
+    if (!isClassInstance(inferenceContext.expectedType)) {
+        return undefined;
+    }
+
+    const tupleClass = evaluator.getTupleClassType();
+    if (!tupleClass || !isInstantiableClass(tupleClass)) {
+        return undefined;
+    }
+
+    // Build an array of expected types.
+    let expectedTypes: Type[] = [];
+
+    if (isTupleClass(inferenceContext.expectedType) && inferenceContext.expectedType.priv.tupleTypeArgs) {
+        expectedTypes = inferenceContext.expectedType.priv.tupleTypeArgs.map((t) =>
+            transformPossibleRecursiveTypeAlias(evaluator, t.type)
+        );
+        const unboundedIndex = inferenceContext.expectedType.priv.tupleTypeArgs.findIndex((t) => t.isUnbounded);
+        if (unboundedIndex >= 0) {
+            if (expectedTypes.length > node.d.items.length) {
+                expectedTypes.splice(unboundedIndex, 1);
+            } else {
+                while (expectedTypes.length < node.d.items.length) {
+                    expectedTypes.splice(unboundedIndex, 0, expectedTypes[unboundedIndex]);
+                }
+            }
+        }
+    } else {
+        const tupleConstraints = constraints ?? new ConstraintTracker(evaluator);
+        if (
+            !addConstraintsForExpectedType(
+                evaluator,
+                ClassType.cloneAsInstance(tupleClass),
+                inferenceContext.expectedType,
+                tupleConstraints,
+                getTypeVarScopesForNode(node),
+                node.start
+            )
+        ) {
+            return undefined;
+        }
+
+        const specializedTuple = evaluator.solveAndApplyConstraints(tupleClass, tupleConstraints) as ClassType;
+        if (!specializedTuple.priv.typeArgs || specializedTuple.priv.typeArgs.length !== 1) {
+            return undefined;
+        }
+
+        const homogenousType = transformPossibleRecursiveTypeAlias(evaluator, specializedTuple.priv.typeArgs[0]);
+        for (let i = 0; i < node.d.items.length; i++) {
+            expectedTypes.push(homogenousType);
+        }
+    }
+
+    const entryTypeResults = node.d.items.map((expr, index) =>
+        evaluator.getTypeOfExpression(
+            expr,
+            flags | EvalFlags.StripTupleLiterals,
+            constraints,
+            makeInferenceContext(
+                index < expectedTypes.length ? expectedTypes[index] : undefined,
+                inferenceContext.isTypeIncomplete
+            )
+        )
+    );
+    const isIncomplete = entryTypeResults.some((result) => result.isIncomplete);
+
+    // Copy any expected type diag addenda for precision error reporting.
+    let expectedTypeDiagAddendum: DiagnosticAddendum | undefined;
+    if (entryTypeResults.some((result) => result.expectedTypeDiagAddendum)) {
+        expectedTypeDiagAddendum = new DiagnosticAddendum();
+        entryTypeResults.forEach((result) => {
+            if (result.expectedTypeDiagAddendum) {
+                expectedTypeDiagAddendum!.addAddendum(result.expectedTypeDiagAddendum);
+            }
+        });
+    }
+
+    // If the tuple contains a very large number of entries, it's probably
+    // generated code. If we encounter type errors, don't bother building
+    // the full tuple type.
+    let type: Type;
+    if (node.d.items.length > maxInferredTupleEntryCount && entryTypeResults.some((result) => result.typeErrors)) {
+        type = makeTupleObject(evaluator, [{ type: UnknownType.create(), isUnbounded: true }]);
+    } else {
+        type = makeTupleObject(evaluator, evaluator.buildTupleTypesList(entryTypeResults, /* stripLiterals */ false));
+    }
+
+    return { type, expectedTypeDiagAddendum, isIncomplete };
+}
+
+export function getTypeOfTupleInferred(evaluator: TypeEvaluator, node: TupleNode, flags: EvalFlags): TypeResult {
+    const entryTypeResults = node.d.items.map((expr) =>
+        evaluator.getTypeOfExpression(expr, flags | EvalFlags.StripTupleLiterals, /* constraints */ undefined)
+    );
+    const isIncomplete = entryTypeResults.some((result) => result.isIncomplete);
+
+    // If the tuple contains a very large number of entries, it's probably
+    // generated code. Rather than taking the time to evaluate every entry,
+    // simply return an unknown type in this case.
+    if (node.d.items.length > maxInferredTupleEntryCount) {
+        return { type: makeTupleObject(evaluator, [{ type: UnknownType.create(), isUnbounded: true }]) };
+    }
+
+    const type = makeTupleObject(
+        evaluator,
+        evaluator.buildTupleTypesList(entryTypeResults, (flags & EvalFlags.StripTupleLiterals) !== 0)
+    );
+
+    if (isIncomplete) {
+        if (getContainerDepth(type) > maxInferredContainerDepth) {
+            return { type: UnknownType.create() };
+        }
+    }
+
+    return { type, isIncomplete };
+}
 
 // Assigns the source type arguments to the dest type arguments. It assumed
 // the the caller has already verified that both the dest and source are

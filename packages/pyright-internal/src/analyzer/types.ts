@@ -7,6 +7,7 @@
  * Representation of types used during type analysis within Python.
  */
 
+import { partition } from '../common/collectionUtils';
 import { assert } from '../common/debug';
 import { Uri } from '../common/uri/uri';
 import { ArgumentNode, ExpressionNode, NameNode, ParamCategory } from '../parser/parseNodes';
@@ -131,7 +132,7 @@ export interface TypeSameOptions {
     treatBoundScopeIdForTypeVarAsUnBound?: boolean;
 }
 
-export interface TypeAliasInfo {
+export interface TypeAliasSharedInfo {
     name: string;
     fullName: string;
     moduleName: string;
@@ -149,7 +150,11 @@ export interface TypeAliasInfo {
 
     // Lazily-evaluated variance of type parameters based on how
     // they are used in the type alias
-    usageVariance: Variance[] | undefined;
+    computedVariance: Variance[] | undefined;
+}
+
+export interface TypeAliasInfo {
+    shared: TypeAliasSharedInfo;
 
     // Type argument, if type alias is specialized
     typeArgs: Type[] | undefined;
@@ -2981,7 +2986,7 @@ export interface TypeVarDetailsShared {
     isTypeParamSyntax: boolean;
 
     // Information about recursive type aliases.
-    recursiveAlias: RecursiveAliasInfo | undefined;
+    recursiveAlias: TypeAliasSharedInfo | undefined;
 }
 
 export type ParamSpecAccess = 'args' | 'kwargs';
@@ -3269,6 +3274,12 @@ export namespace TypeVarType {
         return newInstance;
     }
 
+    export function cloneWithComputedVariance(type: TypeVarType, computedVariance: Variance): TypeVarType {
+        const newInstance = TypeBase.cloneType(type);
+        newInstance.priv.computedVariance = computedVariance;
+        return newInstance;
+    }
+
     export function makeNameWithScope(name: string, scopeId: string, scopeName: string) {
         // We include the scopeName here even though it's normally already part
         // of the scopeId. There are cases where it can diverge, specifically
@@ -3375,8 +3386,8 @@ export namespace TypeVarType {
         return MyPyrightExtensions.isMappedTypeVar(typeVarType) ? `${keyBase}-mapped` : keyBase;
     }
 
-    export function getReadableName(type: TypeVarType) {
-        if (type.priv.scopeName) {
+    export function getReadableName(type: TypeVarType, includeScope = true) {
+        if (type.priv.scopeName && includeScope) {
             return `${type.shared.name}@${type.priv.scopeName}`;
         }
 
@@ -4009,19 +4020,19 @@ export interface CombineTypesOptions {
 // are combined into a UnionType. NeverTypes are filtered out.
 // If no types remain in the end, a NeverType is returned.
 export function combineTypes(subtypes: Type[], options?: CombineTypesOptions): Type {
-    // Filter out any "Never" and "NoReturn" types.
-    let sawNoReturn = false;
+    let neverTypes: NeverType[];
 
-    if (subtypes.some((subtype) => subtype.category === TypeCategory.Never))
-        subtypes = subtypes.filter((subtype) => {
-            if (subtype.category === TypeCategory.Never && subtype.priv.isNoReturn) {
-                sawNoReturn = true;
-            }
-            return subtype.category !== TypeCategory.Never;
-        });
+    // Filter out any Never or NoReturn types.
+    [neverTypes, subtypes] = partition<Type, NeverType>(subtypes, isNever);
 
     if (subtypes.length === 0) {
-        return sawNoReturn ? NeverType.createNoReturn() : NeverType.createNever();
+        if (neverTypes.length > 0) {
+            // Prefer NoReturn over Never. This approach preserves type alias
+            // information if present.
+            return neverTypes.find((t) => t.priv.isNoReturn) ?? neverTypes[0];
+        }
+
+        return NeverType.createNever();
     }
 
     // Handle the common case where there is only one type.

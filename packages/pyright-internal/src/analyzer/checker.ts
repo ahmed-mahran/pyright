@@ -925,7 +925,7 @@ export class Checker extends ParseTreeWalker {
 
         const enclosingFunctionNode = ParseTreeUtils.getEnclosingFunction(node);
         let declaredReturnType = enclosingFunctionNode
-            ? this._evaluator.getFunctionDeclaredReturnType(enclosingFunctionNode)
+            ? this._evaluator.getDeclaredReturnType(enclosingFunctionNode)
             : undefined;
 
         if (node.d.expr) {
@@ -2335,7 +2335,7 @@ export class Checker extends ParseTreeWalker {
                         // the TypeVar multiple times.
                         const baseType = this._evaluator.getType(baseExpression);
                         const aliasInfo = baseType?.props?.typeAliasInfo;
-                        if (aliasInfo?.typeParams && subscriptIndex < aliasInfo.typeParams.length) {
+                        if (aliasInfo?.shared.typeParams && subscriptIndex < aliasInfo.shared.typeParams.length) {
                             isExempt = true;
                         }
                     }
@@ -2775,7 +2775,7 @@ export class Checker extends ParseTreeWalker {
         const overloadReturnType = overloadBoundFunctionType
             ? this._evaluator.solveAndApplyConstraints(
                   FunctionType.getEffectiveReturnType(overloadBoundFunctionType) ??
-                      this._evaluator.getFunctionInferredReturnType(overloadBoundFunctionType),
+                      this._evaluator.getInferredReturnType(overloadBoundFunctionType),
                   constraints
               )
             : undefined;
@@ -2784,7 +2784,7 @@ export class Checker extends ParseTreeWalker {
         const implReturnType = implBoundFunctionType
             ? this._evaluator.solveAndApplyConstraints(
                   FunctionType.getEffectiveReturnType(implBoundFunctionType) ??
-                      this._evaluator.getFunctionInferredReturnType(implBoundFunctionType),
+                      this._evaluator.getInferredReturnType(implBoundFunctionType),
                   constraints
               )
             : undefined;
@@ -3497,7 +3497,7 @@ export class Checker extends ParseTreeWalker {
 
                 // If the return type has not yet been inferred, do so now.
                 if (primaryType && isFunction(primaryType)) {
-                    this._evaluator.getFunctionInferredReturnType(primaryType);
+                    this._evaluator.getInferredReturnType(primaryType);
                 }
 
                 const otherType = this._evaluator.getTypeForDeclaration(otherDecl)?.type;
@@ -3512,7 +3512,7 @@ export class Checker extends ParseTreeWalker {
 
                 // If the return type has not yet been inferred, do so now.
                 if (otherType && isFunction(otherType)) {
-                    this._evaluator.getFunctionInferredReturnType(otherType);
+                    this._evaluator.getInferredReturnType(otherType);
                 }
 
                 // If both declarations are functions, it's OK if they
@@ -4282,7 +4282,7 @@ export class Checker extends ParseTreeWalker {
             if (deprecatedForm) {
                 if (
                     (isInstantiableClass(type) && type.shared.fullName === deprecatedForm.fullName) ||
-                    type.props?.typeAliasInfo?.fullName === deprecatedForm.fullName
+                    type.props?.typeAliasInfo?.shared.fullName === deprecatedForm.fullName
                 ) {
                     if (
                         PythonVersion.isGreaterOrEqualTo(
@@ -4714,7 +4714,7 @@ export class Checker extends ParseTreeWalker {
                     );
                 }
             } else {
-                const inferredReturnType = this._evaluator.getFunctionInferredReturnType(functionType);
+                const inferredReturnType = this._evaluator.getInferredReturnType(functionType);
                 if (
                     !isNever(inferredReturnType) &&
                     !isNoneInstance(inferredReturnType) &&
@@ -4802,7 +4802,7 @@ export class Checker extends ParseTreeWalker {
                 }
             }
         } else {
-            const inferredReturnType = this._evaluator.getFunctionInferredReturnType(functionType);
+            const inferredReturnType = this._evaluator.getInferredReturnType(functionType);
             this._reportUnknownReturnResult(node, inferredReturnType);
             this._validateReturnTypeIsNotContravariant(inferredReturnType, node.d.name);
         }
