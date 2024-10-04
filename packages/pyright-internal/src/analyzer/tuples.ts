@@ -847,25 +847,29 @@ function allocateSourceTypeVarTuples(matchedTypeArgs: DestItemMatches<TupleTypeA
     class IndexedVar {
         acc: IndexedVarAcc;
         offset: number;
+        isExclusive: boolean;
 
-        constructor(acc: IndexedVarAcc, offset: number) {
+        constructor(acc: IndexedVarAcc, offset: number, isExclusive: boolean) {
             this.acc = acc;
             this.offset = offset;
+            this.isExclusive = isExclusive;
         }
         nextOffset() {
             this.acc.total += 1;
-            return new IndexedVar(this.acc, this.offset + 1);
+            return new IndexedVar(this.acc, this.offset + (this.isExclusive ? 0 : 1), /* isExclusive */ false);
         }
         nextIndexedVar() {
             return new IndexedVar(
                 { index: this.acc.index === undefined ? 0 : this.acc.index + 1, total: 1, isLast: true },
-                0
+                0,
+                /* isExclusive */ true
             );
         }
         toTypeVarTupleIndexedVar(): TypeVarTulpeIndexedVar {
             return {
                 index: this.acc.index,
                 offset: this.offset,
+                isExclusive: this.isExclusive,
                 total: this.acc.total,
                 isLastIndex: this.acc.isLast,
             };
@@ -879,7 +883,7 @@ function allocateSourceTypeVarTuples(matchedTypeArgs: DestItemMatches<TupleTypeA
     }
 
     class TypeVarTupleIndexTracker {
-        lastIndexedVar: IndexedVar = new IndexedVar({ index: undefined, total: 0, isLast: true }, -1);
+        lastIndexedVar: IndexedVar = new IndexedVar({ index: undefined, total: 0, isLast: true }, -1, false);
         typeVarTuple: TypeVarTupleType;
 
         constructor(typeVarTuple: TypeVarTupleType) {

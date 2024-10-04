@@ -2841,6 +2841,7 @@ export enum TypeVarKind {
 export interface TypeVarTulpeIndexedVar {
     index: number | undefined;
     offset: number;
+    isExclusive: boolean;
     total: number;
     isLastIndex: boolean; // last index but might not last offset
 }
@@ -2856,38 +2857,39 @@ export namespace TypeVarTulpeIndexedVar {
                 !!indexedVar2 &&
                 indexedVar1.index === indexedVar2.index &&
                 indexedVar1.offset === indexedVar2.offset &&
+                indexedVar1.isExclusive === indexedVar2.isExclusive &&
                 indexedVar1.total === indexedVar2.total &&
                 indexedVar1.isLastIndex === indexedVar2.isLastIndex)
         );
     }
 
     export function isFirst(indexedVar: TypeVarTulpeIndexedVar) {
-        return indexedVar.index === undefined && indexedVar.offset === 0;
+        return indexedVar.index === undefined && indexedVar.offset === 0 && !indexedVar.isExclusive;
     }
 
     export function isLast(indexedVar: TypeVarTulpeIndexedVar) {
-        return indexedVar.isLastIndex && indexedVar.offset === indexedVar.total - 1;
+        return indexedVar.isLastIndex && indexedVar.offset === indexedVar.total - (indexedVar.isExclusive ? 1 : 0);
     }
 
     export function areAdjacent(indexedVar: TypeVarTulpeIndexedVar, nextIndexedVar: TypeVarTulpeIndexedVar): boolean {
-        // if they are the same variable, offsests should be adjacent
-        // e.g. (i0 + 1) and (i0 + 2)
-        if (indexedVar.index === nextIndexedVar.index) {
-            return indexedVar.offset === nextIndexedVar.offset - 1;
-        }
-        // o.w. variables should be adjacent (e.g. i0 and i1, or undefined and i0)
-        // and offset of the first variable should indicate the last use of that variable
-        // and offset of the next variable should indicate the first use of that variable
+        // Cases:
+        // - index then index
+        // - index then slice start
+        // - slice end then slice start
+        // - slice end then index
         return (
-            (indexedVar.index ?? -1) === (nextIndexedVar.index ?? -1) - 1 &&
-            indexedVar.offset === indexedVar.offset - 1 &&
-            nextIndexedVar.offset === 0
+            indexedVar.index === nextIndexedVar.index &&
+            // the other variable is either an index or a slice start, both are inclusive
+            !nextIndexedVar.isExclusive &&
+            // slice end is exclusive so next offset must be the same
+            // index or slice start are inclusive so next offset must be +1 greater
+            indexedVar.offset + (indexedVar.isExclusive ? 0 : 1) === nextIndexedVar.offset
         );
     }
 
     export function length(start: TypeVarTulpeIndexedVar, end: TypeVarTulpeIndexedVar) {
         if (start.index === end.index) {
-            return end.offset - start.offset + 1;
+            return end.offset - start.offset;
         }
         return undefined;
     }
@@ -2898,7 +2900,7 @@ export namespace TypeVarTulpeIndexedVar {
         }
 
         if (indexedVar.isLastIndex) {
-            return (indexedVar.offset - indexedVar.total).toString();
+            return (indexedVar.offset - indexedVar.total + 1).toString();
         }
 
         return `i${indexedVar.index}${
