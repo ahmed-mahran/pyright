@@ -345,3 +345,164 @@ Similar PEP drafts:
 
 - [A Map Operator for Variadic Type Variables](https://docs.google.com/document/d/1szTVcFyLznoDT7phtT-6Fpvp27XaBw9DmbTLHrB6BE4/edit).
 - [Type Transformations on Variadic Generics](https://discuss.python.org/t/pre-pep-considerations-and-feedback-type-transformations-on-variadic-generics/50605).
+
+## Subscriptable Functions
+
+It is common in typed tensor operations to pass dimension types as function arguments. Subscriptable functions imposes itself mainly for the following reasons:
+
+- Type arguments are more naturally fit where type parameters are defined/expected. If you define a generic function `def fn[T](tp: Type[T])`, it feels more natural to pass a type argument such as `int` between the square brackets, i.e. `fn[int]()` instead of `fn(int)`. `cast(obj, cls)` or `cast(cls, obj)`, isn't it confusing? It is actually `cast(cls, obj)` but woulddn't `cast[cls](obj)` feel more natural? Or `obj.cast[cls]`, `obj.as[cls]`, `obj.asinstanceof[cls]` ...
+- It is crucial to be able to bind certain type parameters to specific type arguments regardless from the order of function parameters. This is crucial especially in methods where `self` argument needs to be annotated using certain type parameters that appear next in method signature. Also, when multiple variadic type variables are used in `self` annotation, pre- and post-binding of a type variable can lead to different variadic type variables assignment.
+
+Consider the following `transpose` operation which is supposed to swap two dimensions:
+
+```python
+class Tensor[*Shape]:
+  def transpose[*Init, D1, *Mid, D2, *Tail](
+    self: Tensor[*Init, D1, *Mid, D2, *Tail],
+    d1: Type[D1],
+    d2: Type[D2]
+  ) -> Tensor[*Init, D2, *Mid, D1, *Tail]: ...
+```
+
+The `transpose` operation matches any tensor shape with the pattern `[*Init, D1, *Mid, D2, *Tail]`. It is only interested in the two dimensions `D1` and `D2` that will swap places in the same shape pattern to result in the shape `[*Init, D2, *Mid, D1, *Tail]`.
+
+```python
+x = Tensor[A, B, C, D]()
+reveal_type(x.transpose(B, D)) # Tensor[A, B, D, C]
+# Error:
+# Argument of type "type[B]" cannot be assigned to parameter "d1" of type "type[C]" in function "transpose"
+#  "type[B]" is not assignable to "type[C]"
+```
+
+The type checker has matched the type parameters of `self: Tensor[*Init, D1, *Mid, D2, *Tail]` first leading to the assignment: `*Init = [A, B], D1 = C, *Mid = [], D2 = D, *Tail = []`. Then by substituting these assignements in the rest of the function parameters and return type, the method signature becomes:
+
+```python
+def transpose(
+  self: Tensor[*[A, B], C, *[], D, *[]],
+  d1: Type[C],
+  d2: Type[D]
+) -> Tensor[*[A, B], D, *[], C, *[]]: ...
+```
+
+This explains the return type of `Tensor[A, B, D, C]` instead of `Tensor[A, D, C, B]`. This also explains type error in function first argument, the method expects `d1` of type `Type[C]` while the caller has passed an argument of type `Type[B]`.
+
+This should be resolved with subscriptable functions.
+
+```python
+x = Tensor[A, B, C, D]()
+reveal_type(x.transpose[B, D]()) # Tensor[A, D, C, B]
+```
+
+The type checker has matched the type parameters of `transpose` first leading to the assignment `D1 = B, D2 = D`. Then by substituting these assignements in the rest of the function parameters and return type, the method signature becomes:
+
+```python
+def transpose(
+  self: Tensor[*Init, B, *Mid, D, *Tail],
+  d1: Type[B],
+  d2: Type[D]
+) -> Tensor[*Init, D, *Mid, B, *Tail]: ...
+```
+
+Now the type checker can correctly and as intended match function parameters with arguments and infer return type. Matching arguments to parameters leads to the assignment: `*Init = [A], *Mid = [C], *Tail = []`.
+
+### Implementation
+
+MyPyright introduces function and method decorators as new typing extensions: `@subscriptable`, `@subscriptablefunction`, `@subscriptablemethod` and `@subscriptableclassmethod`. These convert functions/methods into objects implementing `__getitem__` dunder method. `@subscriptable` can be used with any function type or method type. Other decorators are special cases which save runtime checks performed by the general decorator `@subscriptable`.
+
+A subscriptable function should be defined like:
+
+```python
+from mypyright_extensions import Map, subscriptable
+
+@subscriptable
+def fn1[A](tp: type[A], a: A) -> A: ...
+
+@subscriptable
+def fn2[A, B](tp: tuple[type[A], type[B]], a: A) -> tuple[A, B]: ...
+
+@subscriptable
+def fn3[A, B, *Cs](tp: Map[type, A, B, *Cs], args) -> tuple[A, B, *Cs]: ...
+```
+
+The first parameter provides runtime refied access to function type parameters. Only type parameters listed in the first function parameter can be used as subscript in function call. This gives flexibility to write generic functions that don't require all type parameters to be used as subscript at call sites. For example, the following function, `fn4`, has two type parameters `A` and `B` but only `A` can be used as subscript in call sites.
+
+```python
+@subscriptable
+def fn4[A, B](tp: type[A], b: B) -> tuple[A, B]: ...
+
+fn4[int](...) # Valid
+fn4[int, str](...) # Invalid
+```
+
+The subscripted function returns a new function with the first parameter stripped. So that the caller needs to provide type arguments between the square brackets once.
+
+```python
+reveal_type(fn1[int]) # (a: int) -> int
+reveal_type(fn2[int, str]) # (a: int) -> tuple[int, str]
+reveal_type(fn3[int, str, int, float]) # (args: Unknown) -> tuple[int, str, int, float]
+reveal_type(fn4[int]) # (b: B) -> tuple[int, B]
+```
+
+The same logic and rules apply to subscriptable methods and class methods however the type parameter must be defined first after `self` and `cls` parameters.
+
+```python
+class Tensor[*Shape]:
+  @subscriptable
+  def transpose[*Init, D1, *Mid, D2, *Tail](
+    self: Tensor[*Init, D1, *Mid, D2, *Tail],
+    tp: tuple[type[D1], type[D2]]
+  ) -> Tensor[*Init, D2, *Mid, D1, *Tail]: ...
+
+x = Tensor[A, B, C, D]()
+reveal_type(x.transpose[B, D]) # () -> Tensor[A, D, C, B]
+reveal_type(x.transpose[B, D]()) # Tensor[A, D, C, B]
+```
+
+#### Subscriptable Overloads
+
+`@overload` can be used to decorate subscriptable signatures since MyPyright has implemented [decoratable overloads]().
+
+```python
+@overload
+@subscriptable
+def fn1[A](tp: type[A], a: A, b: None = None) -> A: ...
+
+@overload
+@subscriptable
+def fn1[A, B](tp: tuple[type[A], type[B]], a: A, b: B) -> tuple[A, B]: ...
+
+@subscriptable
+def fn1[A, B](tp: tuple[type[A], type[B]] | type[A], a: A, b: B) -> tuple[A, B] | A: ...
+
+reveal_type(fn1[int]) # (a: int, b: None = None) -> int
+reveal_type(fn1[int, str]) # (a: int, b: str) -> tuple[int, str]
+```
+
+### This VS [PEP 718](https://peps.python.org/pep-0718/)
+
+[PEP 718](https://peps.python.org/pep-0718/) is also about subscriptable functions. The following are key differences:
+
+- [PEP 718](https://peps.python.org/pep-0718/) is more native since it suggests implementing `__getitem__` method of all function types in the standard library which might have a runtime performance edge as opposed to MyPyright extensions.
+- MyPyright extensions already provide refied runtime access to the type parameters while the PEP mentions this as a future extension.
+- MyPyright allows partial subscriptable functions. This means that not all type parameters are required as subscript arguments. Only those defined in the first (none self or cls) parameter are required.
+- Since MyPyright requires the first (none self or cls) parameter to define subscript types, it is not required to provide further function parameters that uses any of the subscript type parameters. However for some cases, in the context of [PEP 718](https://peps.python.org/pep-0718/), caller may require to provide same types twice: once as a subscript and another as a call argument which defeats the purpose of subscriptable functions.
+
+  ```python
+  @subscriptable
+  def fn[T](tp: type[T]) -> T: ...
+  fn[int]()
+
+  def fn_pep718[T](tp: type[T]) -> T: ...
+  fn_pep718[int](int) # Repeated use of int as subscript and call argument
+  fn_pep718(int) # Caller would fallback to this
+  ```
+
+- Since MyPyright supports transformations of variadic type variables, subscriptable functions are more powerful within the context of MyPyright.
+
+  ```python
+  def fn[*Ts](tp: Map[type, *Ts]) -> tuple[*Ts]
+  reveal_type(fn[int, str]()) # tuple[int, str]
+
+  def fn_pep718[*Ts](*args: *Ts) -> tuple[*Ts]
+  reveal_type(fn_pep718[int, str](int, str)) # tuple[type[int], type[str]]
+  ```
