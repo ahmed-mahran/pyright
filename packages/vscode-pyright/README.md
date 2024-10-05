@@ -190,6 +190,14 @@ def ds[D1, D2, *Ds, *Ps](
 
 It is possible for a variadic type variable to match a composition of singular and variadic type variables. In this case, singular type variables would be assigned singular indices from the variadic type variable. However, other variadic type variables would be assigned unknown length slices. Therefore, MyPyright introduces subscript variables to annotate indices and bounds of slices.
 
+In this context, it is sufficient to know the following:
+
+- `*Init` is assigned some slice `*Ps[:i0]` from the begining of `*Ps` until the `i0`'th index.
+- `V1` is assigned an index just after the previous slice, `Ps[i0]`.
+- `*Mid` is the next variadic type variable and is assigned another generic slice `*Ps[i0 + 1:i1]` starting from the next available index `i0 + 1` until the `i1`'th index.
+- `V2` is the next singular type variable which is assigned the next available adjacent index to the end of `*Mid` which is the `i1`'th index.
+- Finally `*Tail` is assigned the rest of `*Ps` from the next available index `i1 + 1` till the end.
+
 ## Type Transformations of Variadic Type Variables
 
 This is, in short, is about allowing type hinting transformations on individual type elements of a variadic type variable.
