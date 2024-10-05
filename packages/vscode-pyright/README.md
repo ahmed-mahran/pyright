@@ -116,7 +116,7 @@ reveal_type(b(b6())) # tuple[tuple[Mark2, Mark2, Mark2], tuple[()]]
 
 ### Subscripted Variadic Type Variables
 
-There is another problem that [variadic generics PEP-646](https://peps.python.org/pep-0646/) doesn't handle. Consider the following pattern:
+Variadic generics [PEP-646](https://peps.python.org/pep-0646/) doesn't handle [splitting](https://typing.readthedocs.io/en/latest/spec/generics.html#typevartuples-cannot-be-split). Consider the following pattern:
 
 ```python
 def vvs[V, *Vs](vvsparam: tuple[V, *Vs]) -> tuple[V, *Vs]:
@@ -140,8 +140,8 @@ Now back to the case of assiging `[*Ds, D]` to `[V, *Vs]`. We have the following
 - `V` matches the first type of `*Ds`: `Ds[0]`,  and `*Vs` matches the rest of `*Ds` and `D`: `*Ds[1:], D`. This way we have got a **valid generic** assignment of `V` and `*Vs`.
 
   ```python
-  [ V    , *Vs        ]
-  [ Ds[0], *Ds[1:], D ]
+  [ V     ], [ *Vs        ]
+  [ Ds[0] ], [ *Ds[1:], D ]
   ```
 
 MyPyright detects this pattern and internally uses subscripted variadic type variables to resolve a valid and generic assignment of type variables. Note that in the above example, the sequence `Ds[0]@dsd, *Ds[1:]@dsd` is equivalent to `*Ds@dsd`. MyPyright detects that and hence `return _x` is valid as it complies with annotated return type.
@@ -154,15 +154,41 @@ def vs[V1, V2, *Vs](x: Tuple[V1, *Vs, V2]) -> Tuple[V1, *Vs, V2]: ...
 def ds[D1, D2, *Ds, *Ps](x: Tuple[*Ds, D1, D2, *Ps]) -> Tuple[*Ds, D1, D2, *Ps]:
   _x = vs(x) # MyPyright: Tuple[Ds[0]@ds, *Ds[1:]@ds, D1@ds, D2@ds, *Ps[:-1]@ds, Ps[-1]@ds]
              #   Pyright: Tuple[Union[*Ds@ds], D1@ds, D2@ds, Union[*Ps@ds]]
-  return _x
+  return _x  # Pyright: Error!
 ```
 
 MyPyright resolves to this assignment:
 
 ```python
-[ V1   , *Vs                      , V2     ]
-[ Ds[0], *Ds[1:], D1, D2, *Ps[:-1], Ps[-1] ]
+[ V1    ], [ *Vs                       ], [ V2     ]
+[ Ds[0] ], [ *Ds[1:], D1, D2, *Ps[:-1] ], [ Ps[-1] ]
 ```
+
+Remember that matching for variadic type variables is eager, that's why `*Vs` is matching as many variables as possible.
+
+#### Subscript Variables
+
+Another more interesting example:
+
+```python
+def vs[*Init, V1, *Mid, V2, *Tail](
+  x: Tuple[*Init, V1, *Mid, V2, *Tail]
+) -> Tuple[*Init, V1, *Mid, V2, *Tail]: ...
+    
+def ds[D1, D2, *Ds, *Ps](
+  x: Tuple[*Ds, D1, D2, *Ps]
+) -> Tuple[*Ds, D1, D2, *Ps]:
+  _x = vs(x) # MyPyright: Tuple[*Ds@ds, D1@ds, D2@ds, *Ps[:i0]@ds, Ps[i0]@ds, *Ps[i0 + 1:i1]@ds, Ps[i1]@ds, *Ps[i1 + 1:]@ds]
+             #   Pyright: Tuple[Union[*Ds@ds], D1@ds, D2@ds, *Ps@ds]
+  return _x  # Pyright: Error!
+```
+
+```python
+[ *Init                 ], [ V1     ], [ *Mid           ], [ V2     ], [ *Tail        ]
+[ *Ds, D1, D2, *Ps[:i0] ], [ Ps[i0] ], [ *Ps[i0 + 1:i1] ], [ Ps[i1] ], [ *Ps[i1 + 1:] ]
+```
+
+It is possible for a variadic type variable to match a composition of singular and variadic type variables. In this case, singular type variables would be assigned singular indices from the variadic type variable. However, other variadic type variables would be assigned unknown length slices. Therefore, MyPyright introduces subscript variables to annotate indices and bounds of slices.
 
 ## Type Transformations of Variadic Type Variables
 
