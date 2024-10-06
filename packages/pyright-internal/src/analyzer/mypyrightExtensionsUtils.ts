@@ -620,7 +620,7 @@ export namespace MyPyrightExtensions {
                         combineTypes,
                         baseMap
                     );
-                } else if (isAnyUnknownOrObject(type) || isNoneInstance(type)) {
+                } else if (isAnyUnknownOrObject(type) || isNoneInstance(type) || isAnyUnknownOrObject(baseMap.outer)) {
                     return { map: baseMap, arg: unsetFlagMapped(TypeBase.cloneType(type)) };
                 }
             } else {
