@@ -4118,6 +4118,12 @@ class ApplySolvedTypeVarsTransformer extends TypeVarTransformer {
                 });
             }
 
+            if (MyPyrightExtensions.isMappedType(typeVar) && !MyPyrightExtensions.isMappedType(replacement)) {
+                replacement = MyPyrightExtensions.setFlagMapped(TypeBase.cloneType(replacement));
+            } else if (!MyPyrightExtensions.isMappedType(typeVar) && MyPyrightExtensions.isMappedType(replacement)) {
+                replacement = MyPyrightExtensions.unsetFlagMapped(TypeBase.cloneType(replacement));
+            }
+
             if (isTypeVarTuple(replacement) && isTypeVarTuple(typeVar) && typeVar.priv.isUnpacked) {
                 return TypeVarType.cloneForUnpacked(replacement, typeVar.priv.isInUnion);
             }
