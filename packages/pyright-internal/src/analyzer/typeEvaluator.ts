@@ -25644,7 +25644,7 @@ export function createTypeEvaluator(
                 return;
             }
 
-            const subtypeConstraints = constraints ? constraints.clone() : undefined;
+            const subtypeConstraints = constraints?.clone();
 
             if (!assignType(destType, subtype, /* diag */ undefined, subtypeConstraints, flags, recursionCount)) {
                 // Determine if the current subtype is subsumed by another subtype
@@ -25861,10 +25861,6 @@ export function createTypeEvaluator(
             if (isNoneInstance(srcType) && isOptionalType(destType)) {
                 foundMatch = true;
             } else {
-                let bestConstraints: ConstraintTracker | undefined;
-                let bestConstraintsScore: number | undefined;
-                let nakedTypeVarMatches = 0;
-
                 // If the srcType is a literal, try to use the fast-path lookup
                 // in case the destType is a union with hundreds of literals.
                 if (
@@ -25880,6 +25876,9 @@ export function createTypeEvaluator(
                 ) {
                     return true;
                 }
+
+                let nakedTypeVarMatches = 0;
+                const unionConstraints: ConstraintTracker[] = [];
 
                 doForEachSubtype(
                     destType,
@@ -25899,30 +25898,13 @@ export function createTypeEvaluator(
                         ) {
                             foundMatch = true;
                             if (constraintsClone) {
-                                // Ask the constraints to compute a "score" for the current
-                                // contents of the table.
-                                let constraintsScore = constraintsClone.getScore();
-
                                 if (isTypeVar(subtype)) {
                                     if (!constraints?.getMainConstraintSet().getTypeVar(subtype)) {
                                         nakedTypeVarMatches++;
-
-                                        // Handicap the solution slightly so another type var with
-                                        // existing constraints will be preferred.
-                                        constraintsScore += 0.001;
                                     }
                                 }
 
-                                // If the type matches exactly, prefer it over other types.
-                                if (isTypeSame(subtype, stripLiteralValue(srcType))) {
-                                    constraintsScore = Number.POSITIVE_INFINITY;
-                                }
-
-                                if (bestConstraintsScore === undefined || bestConstraintsScore <= constraintsScore) {
-                                    // We found a typeVar mapping with a higher score than before.
-                                    bestConstraintsScore = constraintsScore;
-                                    bestConstraints = constraintsClone;
-                                }
+                                unionConstraints.push(constraintsClone);
                             }
                         }
                     },
@@ -25934,13 +25916,11 @@ export function createTypeEvaluator(
                 // assign a value to any of these type vars at this time.
                 // Typically, they will receive some constraints via some
                 // later argument assignment.
-                if (nakedTypeVarMatches > 1 && (flags & AssignTypeFlags.ArgAssignmentFirstPass) !== 0) {
-                    bestConstraints = undefined;
-                }
-
-                // If we found a winning type var mapping, copy it back to constraints.
-                if (constraints && bestConstraints) {
-                    constraints.copyFromClone(bestConstraints);
+                if (
+                    constraints &&
+                    !(nakedTypeVarMatches > 1 && (flags & AssignTypeFlags.ArgAssignmentFirstPass) !== 0)
+                ) {
+                    constraints.addCombinedConstraints(unionConstraints);
                 }
             }
         }
