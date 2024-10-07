@@ -48,7 +48,6 @@ import {
 } from './types';
 import {
     convertToInstance,
-    doForEachSubtype,
     getContainerDepth,
     InferenceContext,
     isLiteralType,
@@ -57,6 +56,7 @@ import {
     isTypeVarSame,
     isUnboundedTupleClass,
     makeInferenceContext,
+    mapSubtypes,
     specializeTupleClass,
     transformPossibleRecursiveTypeAlias,
 } from './typeUtils';
@@ -106,43 +106,71 @@ export function getTypeOfTuple(
 
     // If the expected type is a union, recursively call for each of the subtypes
     // to find one that matches.
-    let expectedType = inferenceContext?.expectedType;
+    const expectedType = inferenceContext?.expectedType;
     let expectedTypeContainsAny = inferenceContext && isAny(inferenceContext.expectedType);
+    let expectedTypeDiagAddendum: DiagnosticAddendum | undefined;
 
-    if (inferenceContext && isUnion(inferenceContext.expectedType)) {
-        let matchingSubtype: Type | undefined;
+    if (expectedType && isUnion(expectedType)) {
+        let foundSomeMatches: boolean = false;
+        let isIncomplete: boolean = false;
+        const allSubtypesConstrains: ConstraintTracker[] = [];
+        const diags: DiagnosticAddendum[] = [];
 
-        doForEachSubtype(
-            inferenceContext.expectedType,
+        const type = mapSubtypes(
+            expectedType,
             (subtype) => {
                 if (isAny(subtype)) {
                     expectedTypeContainsAny = true;
                 }
 
-                if (!matchingSubtype) {
-                    const subtypeResult = evaluator.useSpeculativeMode(node, () => {
-                        return getTypeOfTupleWithContext(
-                            evaluator,
-                            node,
-                            flags,
-                            makeInferenceContext(subtype),
-                            constraints
-                        );
-                    });
+                const clonedConstraints = constraints?.clone();
+                const subtypeResult = evaluator.useSpeculativeMode(node, () => {
+                    return getTypeOfTupleWithContext(
+                        evaluator,
+                        node,
+                        flags,
+                        makeInferenceContext(subtype),
+                        clonedConstraints
+                    );
+                });
 
-                    if (subtypeResult && evaluator.assignType(subtype, subtypeResult.type)) {
-                        matchingSubtype = subtype;
+                const subDiag = subtypeResult?.expectedTypeDiagAddendum;
+
+                if (
+                    subtypeResult &&
+                    !subtypeResult.typeErrors &&
+                    evaluator.assignType(subtype, subtypeResult.type, subDiag, clonedConstraints)
+                ) {
+                    foundSomeMatches = true;
+                    if (subtypeResult.isIncomplete) {
+                        isIncomplete = true;
                     }
+                    if (clonedConstraints) {
+                        allSubtypesConstrains.push(clonedConstraints);
+                    }
+                    if (subDiag) {
+                        diags.push(subDiag);
+                    }
+                    return subtype;
                 }
+
+                return undefined;
             },
-            /* sortSubtypes */ true
+            { sortSubtypes: true }
         );
 
-        expectedType = matchingSubtype;
-    }
-
-    let expectedTypeDiagAddendum: DiagnosticAddendum | undefined;
-    if (expectedType) {
+        if (foundSomeMatches) {
+            if (constraints) {
+                constraints.addCombinedConstraints(allSubtypesConstrains);
+            }
+            return { type, isIncomplete };
+        } else if (diags.length === 1) {
+            expectedTypeDiagAddendum = diags[0];
+        } else if (diags.length > 1) {
+            expectedTypeDiagAddendum = new DiagnosticAddendum();
+            diags.forEach((diag) => expectedTypeDiagAddendum?.addAddendum(diag));
+        }
+    } else if (expectedType) {
         const result = getTypeOfTupleWithContext(
             evaluator,
             node,
