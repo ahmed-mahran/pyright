@@ -2416,6 +2416,7 @@ export function createTypeEvaluator(
                 narrowedTypeForSet: memberInfo.narrowedTypeForSet,
                 memberAccessDeprecationInfo: memberInfo.memberAccessDeprecationInfo,
                 typeErrors: memberInfo.isDescriptorError,
+                unsolvedType: memberInfo.unsolvedType,
                 descriptorConstraints: memberInfo.descriptorConstraints,
             };
         }
@@ -5722,6 +5723,7 @@ export function createTypeEvaluator(
         const isRequired = false;
         const isNotRequired = false;
         let memberAccessDeprecationInfo: MemberAccessDeprecationInfo | undefined;
+        let unsolvedType: Type | undefined;
         let descriptorConstraints: ConstraintTracker | undefined;
 
         if (usage?.setType?.isIncomplete) {
@@ -5861,21 +5863,13 @@ export function createTypeEvaluator(
                 }
 
                 if (!typeResult) {
-                    let memberAccessFlags: MemberAccessFlags = MemberAccessFlags.Default;
-                    if ((flags & EvalFlags.TypeExpression) !== 0) {
-                        memberAccessFlags |= MemberAccessFlags.TypeExpression;
-                    }
-                    if ((flags && EvalFlags.NoIndexBaseTypeVarResolution) !== 0) {
-                        memberAccessFlags |= MemberAccessFlags.SkipDescriptorTypeVarResolution;
-                    }
-
                     typeResult = getTypeOfBoundMember(
                         node.d.member,
                         baseType,
                         memberName,
                         usage,
                         diag,
-                        memberAccessFlags,
+                        (flags & EvalFlags.TypeExpression) === 0 ? undefined : MemberAccessFlags.TypeExpression,
                         baseTypeResult.bindToSelfType
                     );
                 }
@@ -5911,6 +5905,7 @@ export function createTypeEvaluator(
                         memberAccessDeprecationInfo = typeResult.memberAccessDeprecationInfo;
                     }
 
+                    unsolvedType = typeResult.unsolvedType;
                     descriptorConstraints = typeResult.descriptorConstraints;
                 }
                 break;
@@ -6190,6 +6185,7 @@ export function createTypeEvaluator(
             isNotRequired,
             memberAccessDeprecationInfo,
             typeErrors,
+            unsolvedType,
             descriptorConstraints,
         };
     }
@@ -6355,18 +6351,21 @@ export function createTypeEvaluator(
 
         // If the member is a descriptor object, apply the descriptor protocol
         // now. If the member is an instance or class method, bind the method.
+        let hasDescriptor = false;
+        let unsolvedType: Type | undefined;
         let isDescriptorError = false;
         let isAsymmetricAccessor = false;
         let isDescriptorApplied = false;
         let memberAccessDeprecationInfo: MemberAccessDeprecationInfo | undefined;
         const allDescriptorConstraints: ConstraintTracker[] = [];
 
-        type = mapSubtypes(type, (subtype) => {
+        const accessedType = mapSubtypes(type, (subtype) => {
             const concreteSubtype = makeTopLevelTypeVarsConcrete(subtype);
             const isClassMember = !memberInfo || memberInfo.isClassMember;
             let resultType: Type;
 
             if (isClass(concreteSubtype) && isClassMember && errorNode) {
+                hasDescriptor = true;
                 const descResult = applyDescriptorAccessMethod(
                     subtype,
                     concreteSubtype,
@@ -6377,12 +6376,9 @@ export function createTypeEvaluator(
                     errorNode,
                     memberName,
                     usage,
-                    diag
+                    diag,
+                    /* shouldResolveDescriptorTypeVars */ true
                 );
-
-                if (descResult.descriptorConstraints) {
-                    allDescriptorConstraints.push(descResult.descriptorConstraints);
-                }
 
                 if (descResult.isAsymmetricAccessor) {
                     isAsymmetricAccessor = true;
@@ -6473,6 +6469,52 @@ export function createTypeEvaluator(
             return resultType;
         });
 
+        if (hasDescriptor && usage.method === 'get') {
+            unsolvedType = mapSubtypes(type, (subtype) => {
+                const concreteSubtype = makeTopLevelTypeVarsConcrete(subtype);
+                const isClassMember = !memberInfo || memberInfo.isClassMember;
+
+                if (isClass(concreteSubtype) && isClassMember && errorNode) {
+                    const descResult = applyDescriptorAccessMethod(
+                        subtype,
+                        concreteSubtype,
+                        memberInfo,
+                        classType,
+                        selfType,
+                        flags,
+                        errorNode,
+                        memberName,
+                        usage,
+                        diag,
+                        /* shouldResolveDescriptorTypeVars */ false
+                    );
+
+                    if (descResult.descriptorConstraints) {
+                        allDescriptorConstraints.push(descResult.descriptorConstraints);
+                    }
+
+                    return descResult.type;
+                } else if (isFunction(concreteSubtype) || isOverloaded(concreteSubtype)) {
+                    return bindMethodForMemberAccess(
+                        subtype,
+                        concreteSubtype,
+                        memberInfo,
+                        classType,
+                        selfType,
+                        flags,
+                        memberName,
+                        usage,
+                        diag,
+                        recursionCount
+                    ).type;
+                } else {
+                    return subtype;
+                }
+            });
+        }
+
+        type = accessedType;
+
         if (!isDescriptorError && usage.method === 'set' && usage.setType) {
             if (errorNode && memberInfo.symbol.hasTypedDeclarations()) {
                 // This is an assignment to a member with a declared type. Apply
@@ -6518,6 +6560,7 @@ export function createTypeEvaluator(
         return {
             symbol: memberInfo.symbol,
             type,
+            unsolvedType,
             descriptorConstraints: ConstraintTracker.combine(allDescriptorConstraints),
             isTypeIncomplete,
             isDescriptorError,
@@ -6542,10 +6585,16 @@ export function createTypeEvaluator(
         errorNode: ExpressionNode,
         memberName: string,
         usage: EvaluatorUsage,
-        diag: DiagnosticAddendum | undefined
+        diag: DiagnosticAddendum | undefined,
+        shouldResolveDescriptorTypeVars: boolean
     ): MemberAccessTypeResult {
+        // shouldResolveDescriptorTypeVars:
+        // If accessed member for get usage is a property or a descriptor,
+        // skip type var resolution and return unsolved property/descriptor
+        // type along with type var constraints in case type vars to be
+        // solved later. This is initially used to defer type var specialization
+        // of subscriptable methods.
         const isAccessedThroughObject = TypeBase.isInstance(classType);
-        const shouldResolveDescriptorTypeVars = (flags & MemberAccessFlags.SkipDescriptorTypeVarResolution) === 0;
 
         let accessMethodName: string;
         if (usage.method === 'get') {
@@ -6636,17 +6685,16 @@ export function createTypeEvaluator(
             }
 
             if (accessMethodClass) {
-                const constraints = shouldResolveDescriptorTypeVars
-                    ? new ConstraintTracker(evaluatorInterface)
-                    : undefined;
                 accessMethodClass = selfSpecializeClass(accessMethodClass);
-                assignType(
-                    ClassType.cloneAsInstance(accessMethodClass),
-                    ClassType.cloneAsInstance(memberInfo.classType),
-                    /* diag */ undefined,
-                    constraints
-                );
-                if (constraints) {
+
+                if (shouldResolveDescriptorTypeVars) {
+                    const constraints = new ConstraintTracker(evaluatorInterface);
+                    assignType(
+                        ClassType.cloneAsInstance(accessMethodClass),
+                        ClassType.cloneAsInstance(memberInfo.classType),
+                        /* diag */ undefined,
+                        constraints
+                    );
                     accessMethodClass = solveAndApplyConstraints(accessMethodClass, constraints) as ClassType;
                 }
 
@@ -7068,9 +7116,29 @@ export function createTypeEvaluator(
     function getTypeOfIndex(node: IndexNode, flags = EvalFlags.None): TypeResult {
         const baseTypeResult = getTypeOfExpression(
             node.d.leftExpr,
-            flags | EvalFlags.IndexBaseDefaults | EvalFlags.NoIndexBaseTypeVarResolution,
+            flags | EvalFlags.IndexBaseDefaults,
             /* constraints */ undefined
         );
+
+        // Defers resolution of type vars for index base type until index result
+        // type is determined. This is used for subscriptable methods so that
+        // method index type arguments are evaluated first before self type.
+        //
+        // If baseType is subscriptable, we don't want to apply descriptor constraints now if any
+        // Subscriptable method decorator holds type of owner, we defer owner specialization until
+        // index params are resolved.
+        // @subscriptablemethod
+        // def fn[*As, B](self: Owner[B, *As], tp: Map[type, *As, B]): ...
+        // owner.fn[int, int, str]
+        // if we resolve self first        : B = int, *As = *tuple[int, str]
+        // if we resolve index params first: *As = *tuple[int, int], B = str
+        // descriptor constraints should hold solutions when self is resolved first
+        const baseType =
+            isClass(baseTypeResult.type) &&
+            MyPyrightExtensions.isSubscriptable(baseTypeResult.type) &&
+            !!baseTypeResult.unsolvedType
+                ? baseTypeResult.unsolvedType
+                : baseTypeResult.type;
 
         // If this is meant to be a type and the base expression is a string expression,
         // emit an error because this is an illegal annotation form and will generate a
@@ -7096,12 +7164,8 @@ export function createTypeEvaluator(
 
             if (!skipSubscriptCheck) {
                 const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-                if (
-                    isInstantiableClass(baseTypeResult.type) &&
-                    ClassType.isBuiltIn(baseTypeResult.type) &&
-                    !baseTypeResult.type.priv.aliasName
-                ) {
-                    const minPythonVersion = nonSubscriptableBuiltinTypes.get(baseTypeResult.type.shared.fullName);
+                if (isInstantiableClass(baseType) && ClassType.isBuiltIn(baseType) && !baseType.priv.aliasName) {
+                    const minPythonVersion = nonSubscriptableBuiltinTypes.get(baseType.shared.fullName);
                     if (
                         minPythonVersion !== undefined &&
                         PythonVersion.isLessThan(fileInfo.executionEnvironment.pythonVersion, minPythonVersion) &&
@@ -7110,7 +7174,7 @@ export function createTypeEvaluator(
                         addDiagnostic(
                             DiagnosticRule.reportIndexIssue,
                             LocMessage.classNotRuntimeSubscriptable().format({
-                                name: baseTypeResult.type.priv.aliasName || baseTypeResult.type.shared.name,
+                                name: baseType.priv.aliasName || baseType.shared.name,
                             }),
                             node.d.leftExpr
                         );
@@ -7119,28 +7183,12 @@ export function createTypeEvaluator(
             }
         }
 
-        // If baseType is subscriptable, we don't want to apply descriptor constraints now if any
-        // Subscriptable method decorator holds type of owner, we defer owner specialization until
-        // index params are resolved.
-        // @subscriptablemethod
-        // def fn[*As, B](self: Owner[B, *As], tp: Map[type, *As, B]): ...
-        // owner.fn[int, int, str]
-        // if we resolve self first        : B = int, *As = *tuple[int, str]
-        // if we resolve index params first: *As = *tuple[int, int], B = str
-        // descriptor constraints should hold solutions when self is resolved first
-        if (
-            (!isClass(baseTypeResult.type) || !MyPyrightExtensions.isSubscriptable(baseTypeResult.type)) &&
-            !!baseTypeResult.descriptorConstraints
-        ) {
-            baseTypeResult.type = solveAndApplyConstraints(baseTypeResult.type, baseTypeResult.descriptorConstraints);
-        }
-
         // We need to collect type var constraints of index params
         const indexTypeConstraints = new ConstraintTracker(evaluatorInterface);
         const indexTypeResultEvalFlags = flags | EvalFlags.NoConvertSpecialForm;
         const indexTypeResult = getTypeOfIndexWithBaseType(
             node,
-            baseTypeResult,
+            { ...baseTypeResult, type: baseType },
             { method: 'get' },
             indexTypeResultEvalFlags,
             indexTypeConstraints
@@ -7149,12 +7197,12 @@ export function createTypeEvaluator(
         // If base type is subscriptable method, this is the time to resolve deferred type vars
         // If descriptorConstraints exists, this implies subscriptable is a descriptor
         if (
-            isClass(baseTypeResult.type) &&
-            MyPyrightExtensions.isSubscriptable(baseTypeResult.type) &&
+            isClass(baseType) &&
+            MyPyrightExtensions.isSubscriptable(baseType) &&
             !!baseTypeResult.descriptorConstraints &&
-            baseTypeResult.type.priv.typeArgs
+            baseType.priv.typeArgs
         ) {
-            const unsolvedOwnerType = baseTypeResult.type.priv.typeArgs[0];
+            const unsolvedOwnerType = baseType.priv.typeArgs[0];
             // Resolve type vars from index items
             const ownerTypeWithIndexConstraints = solveAndApplyConstraints(unsolvedOwnerType, indexTypeConstraints);
             // Resolve type vars from descriptor
@@ -7179,8 +7227,8 @@ export function createTypeEvaluator(
             // We limit type narrowing for index expressions to built-in types that are
             // known to have symmetric __getitem__ and __setitem__ methods (i.e. the value
             // passed to __setitem__ is the same type as the value returned by __getitem__).
-            let baseTypeSupportsIndexNarrowing = !isAny(baseTypeResult.type);
-            mapSubtypesExpandTypeVars(baseTypeResult.type, /* options */ undefined, (subtype) => {
+            let baseTypeSupportsIndexNarrowing = !isAny(baseType);
+            mapSubtypesExpandTypeVars(baseType, /* options */ undefined, (subtype) => {
                 if (
                     !isClassInstance(subtype) ||
                     !(ClassType.isBuiltIn(subtype) || ClassType.isTypedDictClass(subtype))
@@ -23728,6 +23776,17 @@ export function createTypeEvaluator(
             selfClass
         );
 
+        // This specializes subscriptable's tp param to match that of the original function.
+        // This is required so that __getitem__ matches exactly original function in tp param
+        // and user gets precise error reports, also mainly createFunctionFromSubscriptable
+        // of getFunctionTypeOfCallable should be able to create specialized anonymous function.
+        //
+        // @subscriptable
+        // def originalFunction(tp: tpParamType, ...)
+        // subscriptable {
+        //   def __getitem__(self, tp: type.priv.specializedTypes.parameterTypes[1])
+        // }
+        // TODO: needs review; this could by buggy!
         if (
             !!selfClass &&
             isClass(selfClass) &&

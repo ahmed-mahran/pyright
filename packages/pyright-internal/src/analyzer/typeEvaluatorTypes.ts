@@ -179,11 +179,6 @@ export const enum EvalFlags {
     // with the enclosing class or an outer scope.
     EnforceClassTypeVarScope = 1 << 31,
 
-    // Defers resolution of type vars for index base type until index result
-    // type is determined. This is used for subscriptable methods so that
-    // method index type arguments are evaluated first before self type.
-    NoIndexBaseTypeVarResolution = 1 << 32,
-
     // Defaults used for evaluating the LHS of a call expression.
     CallBaseDefaults = NoSpecialize,
 
@@ -263,6 +258,7 @@ export interface TypeResult<T extends Type = Type> {
 
     // Type var constraints if member is a descriptor (or a property) with
     // delayed unresolved type vars.
+    unsolvedType?: Type | undefined;
     descriptorConstraints?: ConstraintTracker | undefined;
 }
 
@@ -471,6 +467,7 @@ export interface ClassMemberLookup {
 
     // Type var constraints if member is a descriptor (or a property)
     // with unresolved type vars.
+    unsolvedType?: Type | undefined;
     descriptorConstraints?: ConstraintTracker | undefined;
 }
 

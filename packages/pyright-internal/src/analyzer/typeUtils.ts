@@ -160,13 +160,6 @@ export const enum MemberAccessFlags {
     // expression, and errors should be reported if it doesn't conform
     // with type expression rules.
     TypeExpression = 1 << 11,
-
-    // If accessed member for get usage is a property or a descriptor,
-    // skip type var resolution and return unsolved property/descriptor
-    // type along with type var constraints in case type vars to be
-    // solved later. This is initially used to defer type var specialization
-    // of subscriptable methods.
-    SkipDescriptorTypeVarResolution = 1 << 12,
 }
 
 export const enum ClassIteratorFlags {
