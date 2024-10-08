@@ -24,6 +24,7 @@ import {
     ClassType,
     combineTypes,
     FunctionType,
+    hasSomeTypeVar,
     isAny,
     isAnyOrUnknown,
     isClass,
@@ -61,6 +62,7 @@ import {
     isEffectivelyInstantiable,
     isLiteralTypeOrUnion,
     isPartlyUnknown,
+    isTypeVarSame,
     mapSubtypes,
     simplifyFunctionToParamSpec,
     sortTypes,
@@ -136,6 +138,11 @@ export function assignTypeVar(
     // An TypeVar can always be assigned to itself, but we won't record this in the constraints.
     if (isTypeSame(destType, srcType)) {
         return true;
+    }
+
+    // Guard against recursive type var assignment
+    if (hasSomeTypeVar(srcType, (subTypeVar) => isTypeVarSame(destType, subTypeVar))) {
+        return false;
     }
 
     if (isParamSpec(destType)) {

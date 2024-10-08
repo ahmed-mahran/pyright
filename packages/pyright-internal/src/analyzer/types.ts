@@ -3499,18 +3499,24 @@ export function isTypeVar(type: Type): type is TypeVarType {
 }
 
 export function hasTypeVar(type: Type) {
+    return hasSomeTypeVar(type, (_) => true);
+}
+
+export function hasSomeTypeVar(type: Type, predicate: (typeVar: TypeVarType) => boolean) {
     if (isTypeVar(type)) {
-        return true;
+        return predicate(type);
     }
 
     let result = false;
-    class OnTypeVarStopWalker extends TypeWalker {
+    class OnSomeTypeVarStopWalker extends TypeWalker {
         override visitTypeVar(type: TypeVarType): void {
-            result = true;
-            this.cancelWalk();
+            result = predicate(type);
+            if (result) {
+                this.cancelWalk();
+            }
         }
     }
-    new OnTypeVarStopWalker().walk(type);
+    new OnSomeTypeVarStopWalker().walk(type);
     return result;
 }
 

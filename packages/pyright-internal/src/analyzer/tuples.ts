@@ -139,7 +139,7 @@ export function getTypeOfTuple(
                 if (
                     subtypeResult &&
                     !subtypeResult.typeErrors &&
-                    evaluator.assignType(subtype, subtypeResult.type, subDiag, clonedConstraints)
+                    evaluator.assignType(subtype, subtypeResult.type, subDiag)
                 ) {
                     foundSomeMatches = true;
                     if (subtypeResult.isIncomplete) {

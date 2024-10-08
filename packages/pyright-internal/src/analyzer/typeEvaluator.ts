@@ -24495,7 +24495,7 @@ export function createTypeEvaluator(
                                 cloneUnsetFlagMappedIfMapped(isContra ? destType : solvedType),
                                 cloneUnsetFlagMappedIfMapped(isContra ? solvedType : srcType),
                                 diag,
-                                constraints?.clone(),
+                                /* constraints */ undefined, //constraints?.clone(),
                                 flags,
                                 recursionCount
                             );
