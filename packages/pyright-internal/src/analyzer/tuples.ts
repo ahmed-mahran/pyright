@@ -269,6 +269,7 @@ export function getTypeOfTupleWithContext(
         )
     );
     const isIncomplete = entryTypeResults.some((result) => result.isIncomplete);
+    const typeErrors = entryTypeResults.some((result) => result.typeErrors);
 
     // Copy any expected type diag addenda for precision error reporting.
     let expectedTypeDiagAddendum: DiagnosticAddendum | undefined;
@@ -291,7 +292,7 @@ export function getTypeOfTupleWithContext(
         type = makeTupleObject(evaluator, evaluator.buildTupleTypesList(entryTypeResults, /* stripLiterals */ false));
     }
 
-    return { type, expectedTypeDiagAddendum, isIncomplete };
+    return { type, typeErrors, expectedTypeDiagAddendum, isIncomplete };
 }
 
 export function getTypeOfTupleInferred(evaluator: TypeEvaluator, node: TupleNode, flags: EvalFlags): TypeResult {
