@@ -124,15 +124,13 @@ export function getTypeOfTuple(
                 }
 
                 const clonedConstraints = constraints?.clone();
-                const subtypeResult = evaluator.useSpeculativeMode(node, () => {
-                    return getTypeOfTupleWithContext(
-                        evaluator,
-                        node,
-                        flags,
-                        makeInferenceContext(subtype),
-                        clonedConstraints
-                    );
-                });
+                const subtypeResult = getTypeOfTupleWithContext(
+                    evaluator,
+                    node,
+                    flags,
+                    makeInferenceContext(subtype),
+                    clonedConstraints
+                );
 
                 const subDiag = subtypeResult?.expectedTypeDiagAddendum;
 
@@ -151,7 +149,7 @@ export function getTypeOfTuple(
                     if (subDiag) {
                         diags.push(subDiag);
                     }
-                    return subtype;
+                    return subtypeResult.type;
                 }
 
                 return undefined;
