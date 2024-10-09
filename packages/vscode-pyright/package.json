@@ -2,7 +2,7 @@
     "name": "vscode-mypyright",
     "displayName": "MyPyright",
     "description": "VS Code static type checking for Tensors in Python",
-    "version": "1.4.0",
+    "version": "1.4.1",
     "private": true,
     "license": "MIT",
     "author": {
@@ -1568,7 +1568,7 @@
     },
     "scripts": {
         "clean": "shx rm -rf ./dist ./out",
-        "prepackage": "node ./build/renamePackage.js mypyright && node ./build/setVersion.js 1.4.0 1.1.384",
+        "prepackage": "node ./build/renamePackage.js mypyright && node ./build/setVersion.js 1.4.1 1.1.384",
         "package": "vsce package",
         "postpackage": "node ./build/renamePackage.js vscode-mypyright",
         "vscode:prepublish": "node ./build/checkPackage.js && npm run clean && webpack --mode production --progress",
