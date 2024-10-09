@@ -25240,7 +25240,7 @@ export function createTypeEvaluator(
         if (isFunction(destType)) {
             let concreteSrcType = makeTopLevelTypeVarsConcrete(srcType);
 
-            if (isClassInstance(concreteSrcType)) {
+            if (isClassInstance(concreteSrcType) && !MyPyrightExtensions.isSubscriptable(concreteSrcType)) {
                 const boundMethod = getBoundMagicMethod(
                     concreteSrcType,
                     '__call__',
