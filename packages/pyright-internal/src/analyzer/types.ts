@@ -10,7 +10,7 @@
 import { partition } from '../common/collectionUtils';
 import { assert } from '../common/debug';
 import { Uri } from '../common/uri/uri';
-import { ArgumentNode, ExpressionNode, NameNode, ParamCategory } from '../parser/parseNodes';
+import { ArgumentNode, ExpressionNode, NameNode, ParamCategory, TypeAnnotationNode } from '../parser/parseNodes';
 import { ClassDeclaration, FunctionDeclaration, SpecialBuiltInClassDeclaration } from './declaration';
 import { MyPyrightExtensions } from './mypyrightExtensionsUtils';
 import { Symbol, SymbolTable } from './symbol';
@@ -89,6 +89,8 @@ export type Type = UnionableType | NeverType | UnionType;
 // (a generic class, function, or type alias).
 export type TypeVarScopeId = string;
 export const UnificationScopeId: TypeVarScopeId = '-';
+// ${name}.${scopeId}.${scopeName}-${usageOffset}-${usageOffset}-${usageOffset}...
+export const NameWithScopeRegex = /^(.*?)\.(.*?)\.(.*?)(?:-(.*))?$/g;
 
 // Information about an enum member that can be used within a Literal
 // type annotation.
@@ -128,6 +130,7 @@ export interface TypeSameOptions {
     ignoreConditions?: boolean;
     ignoreTypedDictNarrowEntries?: boolean;
     honorTypeForm?: boolean;
+    honorIsTypeArgExplicit?: boolean;
     treatAnySameAsUnknown?: boolean;
     treatBoundScopeIdForTypeVarAsUnBound?: boolean;
 }
@@ -568,7 +571,9 @@ export interface DataClassEntry {
     isKeywordOnly: boolean;
     alias?: string | undefined;
     hasDefault?: boolean | undefined;
+    isDefaultFactory?: boolean | undefined;
     nameNode: NameNode | undefined;
+    typeAnnotationNode: TypeAnnotationNode | undefined;
     defaultExpr?: ExpressionNode | undefined;
     includeInInit: boolean;
     type: Type;
@@ -1075,9 +1080,23 @@ export namespace ClassType {
         return newClassType;
     }
 
-    export function cloneForUnpacked(classType: ClassType, isUnpacked = true): ClassType {
+    export function cloneForUnpacked(classType: ClassType): ClassType {
+        if (classType.priv.isUnpacked) {
+            return classType;
+        }
+
         const newClassType = TypeBase.cloneType(classType);
-        newClassType.priv.isUnpacked = isUnpacked;
+        newClassType.priv.isUnpacked = true;
+        return newClassType;
+    }
+
+    export function cloneForPacked(classType: ClassType): ClassType {
+        if (!classType.priv.isUnpacked) {
+            return classType;
+        }
+
+        const newClassType = TypeBase.cloneType(classType);
+        newClassType.priv.isUnpacked = false;
         return newClassType;
     }
 
@@ -3028,6 +3047,9 @@ export interface TypeVarDetailsPriv {
     // the corresponding free TypeVar.
     freeTypeVar?: TypeVarType | undefined;
 
+    // Is this TypeVar or TypeVarTuple unpacked (i.e. Unpack or * operator applied)?
+    isUnpacked?: boolean | undefined;
+
     subscript?: TypeVarTupleSubscript;
 }
 
@@ -3063,9 +3085,6 @@ export namespace ParamSpecType {
 }
 
 export interface TypeVarTupleDetailsPriv extends TypeVarDetailsPriv {
-    // Is this TypeVarTuple unpacked (i.e. Unpack or * operator applied)?
-    isUnpacked?: boolean | undefined;
-
     // Is this TypeVarTuple included in a Union[]? This allows us to
     // differentiate between Unpack[Vs] and Union[Unpack[Vs]].
     isInUnion?: boolean | undefined;
@@ -3193,10 +3212,13 @@ export namespace TypeVarType {
         return newInstance;
     }
 
-    export function cloneForUnpacked(type: TypeVarTupleType, isInUnion = false) {
+    export function cloneForUnpacked(type: TypeVarType, isInUnion = false) {
         const newInstance = TypeBase.cloneType(type);
         newInstance.priv.isUnpacked = true;
-        newInstance.priv.isInUnion = isInUnion;
+
+        if (isTypeVarTuple(newInstance) && isInUnion) {
+            newInstance.priv.isInUnion = isInUnion;
+        }
 
         if (newInstance.priv.freeTypeVar) {
             newInstance.priv.freeTypeVar = TypeVarType.cloneForUnpacked(newInstance.priv.freeTypeVar, isInUnion);
@@ -3280,6 +3302,18 @@ export namespace TypeVarType {
         const newInstance = TypeBase.cloneType(type);
         newInstance.priv.computedVariance = computedVariance;
         return newInstance;
+    }
+
+    export function getNameWithScopeUnbound(nameWithScope: string) {
+        const result = nameWithScope.match(NameWithScopeRegex);
+        if (result) {
+            const name = result[1];
+            const scopeId = makeUnBoundScopeId(result[2]);
+            const scopeName = result[3];
+            const usageOffset = result[4];
+            return makeNameWithScope(name, scopeId, `${scopeName}${usageOffset ? `-${usageOffset}` : ''}`);
+        }
+        return nameWithScope;
     }
 
     export function makeNameWithScope(name: string, scopeId: string, scopeName: string) {
@@ -3532,6 +3566,10 @@ export function isUnpackedTypeVarTuple(type: Type): type is TypeVarTupleType {
     return isTypeVarTuple(type) && !!type.priv.isUnpacked && !type.priv.isInUnion;
 }
 
+export function isUnpackedTypeVar(type: Type): type is TypeVarTupleType {
+    return isTypeVar(type) && !isTypeVarTuple(type) && !!type.priv.isUnpacked;
+}
+
 export function isUnpackedClass(type: Type): type is ClassType {
     if (!isClass(type) || !type.priv.isUnpacked) {
         return false;
@@ -3541,7 +3579,7 @@ export function isUnpackedClass(type: Type): type is ClassType {
 }
 
 export function isUnpacked(type: Type): boolean {
-    return isUnpackedTypeVarTuple(type) || isUnpackedClass(type);
+    return isUnpackedTypeVarTuple(type) || isUnpackedTypeVar(type) || isUnpackedClass(type);
 }
 
 export function isFunction(type: Type): type is FunctionType {
@@ -3677,12 +3715,24 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
                 return false;
             }
 
+            // This test is required for the "partial" class, which clones
+            // the symbol table to add a custom __call__ method.
+            if (type1.shared.fields !== classType2.shared.fields) {
+                return false;
+            }
+
             if (!type1.priv.isUnpacked !== !classType2.priv.isUnpacked) {
                 return false;
             }
 
             if (!type1.priv.isTypedDictPartial !== !classType2.priv.isTypedDictPartial) {
                 return false;
+            }
+
+            if (options.honorIsTypeArgExplicit) {
+                if (!!type1.priv.isTypeArgExplicit !== !!classType2.priv.isTypeArgExplicit) {
+                    return false;
+                }
             }
 
             if (!options.ignoreTypedDictNarrowEntries && !ClassType.isTypedDictNarrowedEntriesSame(type1, classType2)) {
@@ -3821,6 +3871,19 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
                 : type2TypeVar.priv.scopeId;
 
             if (type1ScopeId !== type2ScopeId) {
+                return false;
+            }
+
+            const type1NameWithScope =
+                options.treatBoundScopeIdForTypeVarAsUnBound && type1.priv.nameWithScope
+                    ? TypeVarType.getNameWithScopeUnbound(type1.priv.nameWithScope)
+                    : type1.priv.nameWithScope;
+            const type2NameWithScope =
+                options.treatBoundScopeIdForTypeVarAsUnBound && type2TypeVar.priv.nameWithScope
+                    ? TypeVarType.getNameWithScopeUnbound(type2TypeVar.priv.nameWithScope)
+                    : type2TypeVar.priv.nameWithScope;
+
+            if (type1NameWithScope !== type2NameWithScope) {
                 return false;
             }
 

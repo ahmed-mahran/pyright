@@ -34,6 +34,7 @@ import {
     isTypeVarTuple,
     isUnion,
     isUnpacked,
+    isUnpackedTypeVar,
     isUnpackedTypeVarTuple,
     TupleTypeArg,
     Type,
@@ -1103,9 +1104,11 @@ export function adjustTupleTypeArgs(
     srcTypeArgs: TupleTypeArg[],
     flags: AssignTypeFlags
 ): boolean {
-    const destUnboundedOrVariadicIndex = destTypeArgs.findIndex((t) => t.isUnbounded || isTypeVarTuple(t.type));
+    const destUnboundedOrVariadicIndex = destTypeArgs.findIndex(
+        (t) => t.isUnbounded || isUnpackedTypeVarTuple(t.type) || isUnpackedTypeVar(t.type)
+    );
     const srcUnboundedIndex = srcTypeArgs.findIndex((t) => t.isUnbounded);
-    const srcVariadicIndex = srcTypeArgs.findIndex((t) => isTypeVarTuple(t.type));
+    const srcVariadicIndex = srcTypeArgs.findIndex((t) => isUnpackedTypeVarTuple(t.type) || isUnpackedTypeVar(t.type));
 
     if (srcUnboundedIndex >= 0) {
         if (isAnyOrUnknown(srcTypeArgs[srcUnboundedIndex].type)) {

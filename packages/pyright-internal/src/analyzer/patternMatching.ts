@@ -60,6 +60,7 @@ import {
     isTypeSame,
     isTypeVarTuple,
     isUnknown,
+    isUnpackedTypeVar,
     isUnpackedTypeVarTuple,
 } from './types';
 import {
@@ -1388,7 +1389,7 @@ function getSequencePatternInfo(
                     ];
 
                     const tupleIndeterminateIndex = typeArgs.findIndex(
-                        (t) => t.isUnbounded || isUnpackedTypeVarTuple(t.type)
+                        (t) => t.isUnbounded || isUnpackedTypeVarTuple(t.type) || isUnpackedTypeVar(t.type)
                     );
 
                     let tupleDeterminateEntryCount = typeArgs.length;
@@ -1418,7 +1419,9 @@ function getSequencePatternInfo(
                         const removedEntries = typeArgs.splice(patternStarEntryIndex, entriesToCombine);
                         typeArgs.splice(patternStarEntryIndex, 0, {
                             type: combineTypes(removedEntries.map((t) => t.type)),
-                            isUnbounded: removedEntries.every((t) => t.isUnbounded || isUnpackedTypeVarTuple(t.type)),
+                            isUnbounded: removedEntries.every(
+                                (t) => t.isUnbounded || isUnpackedTypeVarTuple(t.type) || isUnpackedTypeVar(t.type)
+                            ),
                         });
                     }
 

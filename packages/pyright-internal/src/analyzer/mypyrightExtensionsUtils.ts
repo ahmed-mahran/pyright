@@ -189,7 +189,7 @@ export namespace MyPyrightExtensions {
                 }
                 return tuple;
             } else if (isIterTupleClass && !boundType.priv.isUnpacked) {
-                return ClassType.cloneForUnpacked(boundType, /* isUnpacked */ true);
+                return ClassType.cloneForUnpacked(boundType);
             } else if (isTypeVarTuple(boundType) && !boundType.priv.isUnpacked) {
                 return TypeVarType.cloneForUnpacked(boundType, boundType.priv.isInUnion);
             }
