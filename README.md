@@ -473,7 +473,8 @@ reveal_type(fn1[int]) # (a: int, b: None = None) -> int
 reveal_type(fn1[int, str]) # (a: int, b: str) -> tuple[int, str]
 ```
 
-**TBD**
+##### TBD
+
 `subscriptable` decorators should implement dunder `__call__` method so that `@overload` can be used. However, there are two possible ways to implement `__call__` and only one should be adopted:
 
 **1. Non-subscriptable overload:** The subscript type parameter is assumed to be `None` and the subscriptable function can be called without providing the subscript type parameter as a subscript argument or as a first call argument. If the subscriptable function doesn't define a `None` type parameter in any of its signatures, the type checker can raise an error as well as an error can be raised at runtime.
