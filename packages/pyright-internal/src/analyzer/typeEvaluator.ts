@@ -169,7 +169,13 @@ import { evaluateStaticBoolExpression } from './staticExpressions';
 import { indeterminateSymbolId, Symbol, SymbolFlags } from './symbol';
 import { isConstantName, isPrivateName, isPrivateOrProtectedName } from './symbolNameUtils';
 import { getLastTypedDeclarationForSymbol, isEffectivelyClassVar } from './symbolUtils';
-import { assignTupleTypeArgs, getSlicedTupleType, getTypeOfTuple, makeTupleObject } from './tuples';
+import {
+    assignTupleTypeArgs,
+    getSlicedTupleType,
+    getTypeOfTuple,
+    makeTupleObject,
+    printTupleArgsAssignmentDebug,
+} from './tuples';
 import { SpeculativeModeOptions, SpeculativeTypeTracker } from './typeCacheUtils';
 import {
     assignToTypedDict,
@@ -573,7 +579,7 @@ const maxRecursiveTypeAliasRecursionCount = 10;
 const verifyTypeCacheEvaluatorFlags = false;
 
 // This debugging option prints each expression and its evaluated type.
-const printExpressionTypes = true;
+const printExpressionTypes = false;
 
 // The following number is chosen somewhat arbitrarily. We need to cut
 // off code flow analysis at some point for code flow graphs that are too
@@ -24264,10 +24270,13 @@ export function createTypeEvaluator(
 
         // Handle tuple, which supports a variable number of type arguments.
         if (destType.priv.tupleTypeArgs && curSrcType.priv.tupleTypeArgs) {
-            const msg = `[assignClassWithTypeArgs] ${getPrintExpressionTypesSpaces()}${printType(
-                destType
-            )} =? ${printType(curSrcType)} < ${printType(srcType)}`;
-            console.log(msg);
+            let msg: string | undefined;
+            if (printTupleArgsAssignmentDebug) {
+                msg = `[assignClassWithTypeArgs] ${getPrintExpressionTypesSpaces()}${printType(
+                    destType
+                )} =? ${printType(curSrcType)} < ${printType(srcType)}`;
+                console.log(msg);
+            }
             const res = assignTupleTypeArgs(
                 evaluatorInterface,
                 destType,
@@ -24277,7 +24286,9 @@ export function createTypeEvaluator(
                 flags,
                 recursionCount
             );
-            console.log(msg + ` ==> ${res}`);
+            if (printTupleArgsAssignmentDebug) {
+                console.log(msg + ` ==> ${res}`);
+            }
             return res;
         }
 

@@ -86,7 +86,6 @@ export namespace MyPyrightExtensions {
     ) {
         let returnType: Type = typeResult.type;
         if (returnType && isClass(returnType) && returnType.shared.moduleName === 'mypyright_extensions') {
-            console.debug(`Handling ${returnType.shared.fullName}`);
             const diag = function () {
                 if (!typeResult.expectedTypeDiagAddendum) {
                     typeResult.expectedTypeDiagAddendum = new DiagnosticAddendum();

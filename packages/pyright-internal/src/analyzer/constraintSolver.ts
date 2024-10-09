@@ -81,7 +81,7 @@ const maxSubtypeCountForTypeVarLowerBound = 64;
 
 // This debugging switch enables logging of the constraints before and
 // after it is updated by the constraint solver.
-const logConstraintsUpdates = true;
+const logConstraintsUpdates = false;
 
 // Assigns the source type to the dest type var in the type var context. If an existing
 // type is already associated with that type var name, it attempts to either widen or

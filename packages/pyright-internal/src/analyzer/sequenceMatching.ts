@@ -6,6 +6,8 @@
  * Provides generic logic for matching two sequences and associating corresponding elements.
  */
 
+import { printTupleArgsAssignmentDebug } from './tuples';
+
 export interface SequenceItem<Item> {
     item: Item;
     minMatches: number;
@@ -449,7 +451,9 @@ export function traverseAccumulateSequence<A, B, Acc>(
     */
     const spaces = ' '.repeat(recursionCount);
     const baseline = function (indent: string, content: string) {
-        console.debug(`${spaces}[acc_sequence] ${indent}${content}`);
+        if (printTupleArgsAssignmentDebug) {
+            console.debug(`${spaces}[acc_sequence] ${indent}${content}`);
+        }
         return;
     };
 
