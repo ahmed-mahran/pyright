@@ -455,7 +455,7 @@ reveal_type(x.transpose[B, D]()) # Tensor[A, D, C, B]
 
 #### Subscriptable Overloads
 
-`@overload` can be used to decorate subscriptable signatures since MyPyright has implemented [decoratable overloads]().
+`@overload` can be used to decorate subscriptable signatures.
 
 ```python
 @overload
@@ -467,10 +467,62 @@ def fn1[A](tp: type[A], a: A, b: None = None) -> A: ...
 def fn1[A, B](tp: tuple[type[A], type[B]], a: A, b: B) -> tuple[A, B]: ...
 
 @subscriptable
-def fn1[A, B](tp: tuple[type[A], type[B]] | type[A], a: A, b: B) -> tuple[A, B] | A: ...
+def fn1[A, B](tp: tuple[type[A], type[B]] | type[A], a: A, b: B | None = None) -> tuple[A, B] | A: ...
 
 reveal_type(fn1[int]) # (a: int, b: None = None) -> int
 reveal_type(fn1[int, str]) # (a: int, b: str) -> tuple[int, str]
+```
+
+**TBD**
+`subscriptable` decorators should implement dunder `__call__` method so that `@overload` can be used. However, there are two possible ways to implement `__call__` and only one should be adopted:
+
+**1. Non-subscriptable overload:** The subscript type parameter is assumed to be `None` and the subscriptable function can be called without providing the subscript type parameter as a subscript argument or as a first call argument. If the subscriptable function doesn't define a `None` type parameter in any of its signatures, the type checker can raise an error as well as an error can be raised at runtime.
+
+  ```python
+  @overload
+  @subscriptable
+  def fn(tp: None, a: int) -> int: ...
+
+  @overload
+  @subscriptable
+  def fn[T](tp: type[T], a: int) -> tuple[int, T]: ...
+
+  @subscriptable
+  def fn[T](tp: type[T] | None, a: int) -> tuple[int, T] | int: ...
+
+  reveal_type(fn(1)) # int
+  reveal_type(fn[str](1)) # tuple[int, str]
+  ```
+
+**2. Non-subscriptable fallback/alternative** This is to allow calling the function without providing subscript type parameters as subscript arguments but as call arguments.
+
+  ```python
+  @subscriptable
+  def fn[T](tp: type[T], a: int) -> tuple[int, T]: ...
+
+  reveal_type(fn(str, 1)) # tuple[int, str]
+  reveal_type(fn[str](1)) # tuple[int, str]
+  ```
+
+#### Variadic Type Variable Parameter
+
+`TypeVarTuple` can be used as a subscriptable type parameters. This is only possible using [`Map`](#type-transformations-of-variadic-type-variables).
+
+```python
+@overload
+@subscriptable
+def fn2[T](tp: type[T], t: T) -> T: ...
+
+@overload
+@subscriptable
+def fn2[T, *Ts](tp: Map[type, T, *Ts], t: T, *ts: *Ts) -> tuple[T, *Ts]: ...
+
+@subscriptable
+def fn2[T, *Ts](tp: Map[type, T, *Ts] | type[T], t: T, *ts: *Ts) -> tuple[T, *Ts] | T: ...
+
+reveal_type(fn2[int]) # (t: int) -> int
+reveal_type(fn2[int, str]) # (t: int, str) -> tuple[int, str]
+reveal_type(fn2[int, str, float]) # (t: int, str, float) -> tuple[int, str, float]
 ```
 
 ### This VS [PEP 718](https://peps.python.org/pep-0718/)
@@ -492,7 +544,7 @@ reveal_type(fn1[int, str]) # (a: int, b: str) -> tuple[int, str]
   fn_pep718(int) # Caller would fallback to this
   ```
 
-- Since MyPyright supports transformations of variadic type variables, subscriptable functions are more powerful within the context of MyPyright.
+- Since MyPyright supports [transformations of variadic type variables](#type-transformations-of-variadic-type-variables), subscriptable functions are more powerful within the context of MyPyright since [`TypeVarTuple` can be used as a subscript type parameter](#variadic-type-variable-parameter).
 
   ```python
   def fn[*Ts](tp: Map[type, *Ts]) -> tuple[*Ts]
